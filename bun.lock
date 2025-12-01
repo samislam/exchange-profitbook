@@ -9,7 +9,6 @@
         "@clscripts/next": "^15.3.5",
         "@hookform/resolvers": "^3.9.1",
         "@inquirer/prompts": "^7.2.4",
-        "@kodingdotninja/use-tailwind-breakpoint": "^1.0.0",
         "@mdi/js": "^7.4.47",
         "@mdi/react": "^1.6.1",
         "@prisma/client": "^6.3.1",
@@ -62,7 +61,7 @@
         "@clscripts/ts-patch": "^3.3.0",
         "@homer0/prettier-plugin-jsdoc": "10.0.0",
         "@samislam/prettier-config": "2.0.0",
-        "@tailwindcss/postcss": "^4",
+        "@tailwindcss/postcss": "^4.1.17",
         "@tolgee/cli": "^2.13.0",
         "@types/ms": "^2.1.0",
         "@types/node": "^20",
@@ -77,8 +76,8 @@
         "postcss": "^8.5.3",
         "postcss-load-config": "^6.0.1",
         "prettier": "3.7.3",
-        "prettier-plugin-tailwindcss": "0.7.1",
-        "tailwindcss": "^4",
+        "prettier-plugin-tailwindcss": "^0.7.1",
+        "tailwindcss": "^4.1.17",
         "ts-essentials": "^10.1.1",
         "ts-patch": "^3.3.0",
         "tsx": "^4.20.3",
@@ -336,8 +335,6 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
-
-    "@kodingdotninja/use-tailwind-breakpoint": ["@kodingdotninja/use-tailwind-breakpoint@1.0.0", "", { "peerDependencies": { "react": ">=16.8", "tailwindcss": "*" }, "optionalPeers": ["react", "tailwindcss"] }, "sha512-UVN3Au5qBg7H7tkLxInvbozpigout08AWj6wQORtvAO/F67Gb3sAayuOgppHZTjMuQPAUbVL+TWMLwivuIxWtw=="],
 
     "@mdi/js": ["@mdi/js@7.4.47", "", {}, "sha512-KPnNOtm5i2pMabqZxpUz7iQf+mfrYZyKCZ8QNz85czgEt7cuHcGorWfdzUMWYA0SD+a6Hn4FmJ+YhzzzjkTZrQ=="],
 

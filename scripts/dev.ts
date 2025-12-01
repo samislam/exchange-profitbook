@@ -13,7 +13,6 @@ console.log(
 
 const nextCommand = new Next({
   mode: 'dev',
-  turbo: true,
 }).command
 
 const commandToRun = dotenvFile

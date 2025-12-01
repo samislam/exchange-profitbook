@@ -10,8 +10,8 @@ export default createAppConfig({
   defaultLanguage: 'en',
   fallbackLanguage: 'en',
   languages: ['en', 'ar', 'tr'],
-  appName: 'Nexst website template',
-  appDescription: concat('@Nexst web template'),
+  appName: 'Next-web website template',
+  appDescription: concat('@Next-web web template'),
   i18nRoutingDef: {
     localePrefix: 'always', // defaults to have no URL prefix (no /en/users, just /users)
     localeCookie: {

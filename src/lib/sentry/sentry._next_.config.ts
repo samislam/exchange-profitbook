@@ -10,7 +10,7 @@ export const sentryConfig: SentryBuildOptions = {
   project: SENTRY_PROJECT,
   silent: !process.env.CI,
   widenClientFileUpload: true,
-  tunnelRoute: '/monitoring',
+  tunnelRoute: '/_diag',
   webpack: {
     automaticVercelMonitors: true,
     treeshake: {

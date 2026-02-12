@@ -3,7 +3,7 @@ import { middlewareStack } from 'nextjs-middleware-stack'
 import { appRoutingDef } from './lib/next-intl/app-routing-def'
 
 const regExp = {
-  i18nExclude: /^(?!.*\/(api|_next\/static|_next\/image|favicon\.ico)).*$/,
+  i18nExclude: /^(?!.*\/(api|_next\/static|_next\/image|favicon\.ico|_diag)).*$/,
 }
 
 export default middlewareStack([
@@ -14,6 +14,6 @@ export default middlewareStack([
 export const config = {
   matcher: [
     '/(api|trpc)(.*)', // Always run for API routes,
-    '/((?!_next|.*\\..*).*)', // Skip Next.js internals and all static files, unless found in search params
+    '/((?!_next|_diag|.*\\..*).*)', // Skip Next.js internals and all static files, unless found in search params
   ],
 }

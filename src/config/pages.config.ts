@@ -1,17 +1,15 @@
 import { PagesDefs } from '@/types/pagedef.types'
-import { getTranslate } from '@/lib/tolgee/tolgee-server'
 
 export const pageDefs = {
   home: {
     href: '/',
-    title: '@t<home-title>',
-    description: '@t<home-description>',
+    title: 'Home',
+    description: 'Profit book Calculator home page',
     icon: 'mdi:mdiHome',
     async meta() {
-      const t = await getTranslate()
       return {
-        title: t('@t<home_meta.title>'),
-        description: t('@t<home_meta.description>'),
+        title: 'Exchange ProfitBook',
+        description: 'Quickly Calculate profits of exchanges',
       }
     },
   },

@@ -13,8 +13,8 @@ export const serverEnv = createEnv({
     ENABLE_REDIS_CACHE: z.boolean().default(true),
     REDIS_URL: z.string().trim().url().optional(),
     REQUIRE_HTTPS: z.boolean().default(true),
-    SENTRY_ORG: z.string(),
-    SENTRY_PROJECT: z.string(),
+    SENTRY_ORG: z.string().optional(),
+    SENTRY_PROJECT: z.string().optional(),
     IMAGE_OPTIMIZATION: z.enum(['yes', 'no']).default('yes'),
   },
   experimental__runtimeEnv: {

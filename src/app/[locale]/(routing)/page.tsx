@@ -1,8 +1,14 @@
+'use client'
+
+import { useState } from 'react'
 import { ThemeSwitcher } from '@/components/common/theme-switcher'
 import { CalculateForm } from '../composables/calculate-form'
 import { ResultsCard } from '../composables/results-card'
+import { type CalculationResult } from '../composables/calculate'
 
-const Page = async () => {
+const Page = () => {
+  const [result, setResult] = useState<CalculationResult | null>(null)
+
   return (
     <div className="relative min-h-screen p-4 pt-16">
       <div className="absolute top-4 right-4">
@@ -10,10 +16,10 @@ const Page = async () => {
       </div>
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="w-full lg:max-w-2xl">
-          <CalculateForm />
+          <CalculateForm onCalculate={setResult} />
         </div>
         <div className="w-full lg:max-w-2xl">
-          <ResultsCard />
+          <ResultsCard result={result} />
         </div>
       </div>
     </div>

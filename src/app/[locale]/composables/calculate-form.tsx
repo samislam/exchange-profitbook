@@ -9,6 +9,7 @@ import { InputField } from '@/components/common/input-field'
 
 type CalculateFormValues = {
   exchangeRate: string
+  useExchangeRate: boolean
   startingCapital: string
   buyCommission: string
   sellRate: string
@@ -20,6 +21,7 @@ export const CalculateForm = () => {
   const form = useForm<CalculateFormValues>({
     defaultValues: {
       exchangeRate: '43.39',
+      useExchangeRate: true,
       startingCapital: '1000',
       buyCommission: '1',
       sellRate: '44.40',
@@ -27,6 +29,7 @@ export const CalculateForm = () => {
       compoundProfits: true,
     },
   })
+  const isBuyingUsdtInLira = form.watch('useExchangeRate')
 
   const onSubmit = (values: CalculateFormValues) => {
     return values
@@ -56,18 +59,71 @@ export const CalculateForm = () => {
 
           <InputField
             control={form.control}
-            name="buyCommission"
-            label="Buy USDT commission (%)"
+            name="compoundProfits"
+            label="Compound profits?"
+            className="my-1! flex items-center justify-start gap-3 space-y-0"
             render={(field) => (
-              <Input
-                {...field}
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                startAction={<span className="text-muted-foreground text-sm">%</span>}
-              />
+              <Toggle
+                pressed={field.value}
+                onPressedChange={field.onChange}
+                variant="outline"
+                className="min-w-24 justify-center border-0 text-white data-[state=off]:bg-red-600 data-[state=off]:text-white data-[state=off]:hover:bg-red-700 data-[state=on]:bg-emerald-600 data-[state=on]:text-white data-[state=on]:hover:bg-emerald-700"
+              >
+                {field.value ? 'Yes' : 'No'}
+              </Toggle>
             )}
           />
+
+          <InputField
+            control={form.control}
+            name="useExchangeRate"
+            label="Buying USDT in lira or dollars"
+            className="my-1! flex items-center justify-start gap-3 space-y-0"
+            render={(field) => (
+              <Toggle
+                pressed={field.value}
+                onPressedChange={field.onChange}
+                variant="outline"
+                className="min-w-24 justify-center border-0 bg-yellow-500 text-black hover:bg-yellow-600 data-[state=on]:bg-yellow-500 data-[state=on]:text-black data-[state=on]:hover:bg-yellow-600"
+              >
+                {field.value ? 'Buying USDT in lira' : 'Buying USDT in dollars'}
+              </Toggle>
+            )}
+          />
+
+          {isBuyingUsdtInLira && (
+            <InputField
+              control={form.control}
+              name="exchangeRate"
+              label="Exchange rate (TRY)"
+              render={(field) => (
+                <Input
+                  {...field}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  startAction={<span className="text-muted-foreground text-sm">₺</span>}
+                />
+              )}
+            />
+          )}
+
+          {!isBuyingUsdtInLira && (
+            <InputField
+              control={form.control}
+              name="buyCommission"
+              label="Buy USDT commission (%)"
+              render={(field) => (
+                <Input
+                  {...field}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  startAction={<span className="text-muted-foreground text-sm">%</span>}
+                />
+              )}
+            />
+          )}
 
           <InputField
             control={form.control}
@@ -86,41 +142,9 @@ export const CalculateForm = () => {
 
           <InputField
             control={form.control}
-            name="exchangeRate"
-            label="Exchange rate (TRY)"
-            render={(field) => (
-              <Input
-                {...field}
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                startAction={<span className="text-muted-foreground text-sm">₺</span>}
-              />
-            )}
-          />
-
-          <InputField
-            control={form.control}
             name="loopCount"
             label="Loop count"
             render={(field) => <Input {...field} type="number" min="1" step="1" />}
-          />
-
-          <InputField
-            control={form.control}
-            name="compoundProfits"
-            label="Compound profits?"
-            className="my-1! flex items-center justify-start gap-3 space-y-0"
-            render={(field) => (
-              <Toggle
-                pressed={field.value}
-                onPressedChange={field.onChange}
-                variant="outline"
-                className="min-w-24 justify-center border-0 text-white data-[state=off]:bg-red-600 data-[state=off]:text-white data-[state=off]:hover:bg-red-700 data-[state=on]:bg-emerald-600 data-[state=on]:text-white data-[state=on]:hover:bg-emerald-700"
-              >
-                {field.value ? 'Yes' : 'No'}
-              </Toggle>
-            )}
           />
 
           <Button type="submit" className="mt-4 w-full">

@@ -28,12 +28,21 @@ export const calculateExchangeLoops = (values: CalculateFormValues): Calculation
   const startingUsd = toNumber(values.startingCapital)
   const sellRate = toNumber(values.sellRate)
   const exchangeRate = toNumber(values.exchangeRate)
+  const exchangeTaxPercent = toNumber(values.exchangeTaxPercent)
+  const hasExchangeTax = values.exchangeTaxPercent.trim() !== ''
   const buyCommission = toNumber(values.buyCommission)
   const loopCount = Math.max(1, Math.floor(toNumber(values.loopCount)))
 
   if (!Number.isFinite(startingUsd) || startingUsd <= 0) throw new Error('Invalid starting capital')
   if (!Number.isFinite(sellRate) || sellRate <= 0) throw new Error('Invalid sell rate')
   if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error('Invalid exchange rate')
+  if (
+    !values.useExchangeRate &&
+    hasExchangeTax &&
+    (!Number.isFinite(exchangeTaxPercent) || exchangeTaxPercent < 0 || exchangeTaxPercent >= 100)
+  ) {
+    throw new Error('Invalid exchange tax')
+  }
   if (!Number.isFinite(loopCount) || loopCount <= 0) throw new Error('Invalid loop count')
 
   if (values.useExchangeRate) {
@@ -95,13 +104,14 @@ export const calculateExchangeLoops = (values: CalculateFormValues): Calculation
   let workingUsd = startingUsd
   let totalProfitUsd = 0
   const loops: LoopResult[] = []
+  const usdConversionRate = exchangeRate * (1 + (hasExchangeTax ? exchangeTaxPercent / 100 : 0))
 
   for (let i = 1; i <= loopCount; i += 1) {
     const buyUsd = values.compoundProfits ? workingUsd : startingUsd
     const usdtBought = buyUsd * (1 - buyCommission / 100)
     const sellTryAmount = usdtBought * sellRate
-    // USD-mode: after selling to TRY, convert TRY back to USD using exchange rate.
-    const usdAfterCycle = sellTryAmount / exchangeRate
+    // USD-mode: after selling to TRY, convert TRY back to USD including optional exchange tax.
+    const usdAfterCycle = sellTryAmount / usdConversionRate
     const profitUsd = usdAfterCycle - buyUsd
 
     totalProfitUsd += profitUsd
@@ -111,11 +121,11 @@ export const calculateExchangeLoops = (values: CalculateFormValues): Calculation
       loop: i,
       buyAmount: buyUsd,
       buyCurrency: 'USD',
-      buyRateTry: exchangeRate,
+      buyRateTry: usdConversionRate,
       sellRateTry: sellRate,
       usdtBought,
       sellTry: sellTryAmount,
-      profitTry: profitUsd * exchangeRate,
+      profitTry: profitUsd * usdConversionRate,
       profitUsd,
     })
   }

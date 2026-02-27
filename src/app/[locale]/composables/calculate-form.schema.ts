@@ -14,6 +14,7 @@ const isPositiveInteger = (value: string) => {
 export const calculateFormSchema = z
   .object({
     exchangeRate: z.string(),
+    exchangeTaxPercent: z.string(),
     useExchangeRate: z.boolean(),
     applyCommission: z.boolean(),
     startingCapital: z.string(),
@@ -61,6 +62,18 @@ export const calculateFormSchema = z
         code: z.ZodIssueCode.custom,
         path: ['buyCommission'],
         message: 'Commission must be between 0 and 100',
+      })
+    }
+
+    if (
+      !values.useExchangeRate &&
+      values.exchangeTaxPercent.trim() !== '' &&
+      !isValidCommission(values.exchangeTaxPercent)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['exchangeTaxPercent'],
+        message: 'Exchange tax must be between 0 and 100',
       })
     }
   })

@@ -20,6 +20,7 @@ export const CalculateForm = ({ onCalculate }: CalculateFormProps) => {
     resolver: zodResolver(calculateFormSchema),
     defaultValues: {
       exchangeRate: '',
+      exchangeTaxPercent: '',
       useExchangeRate: true,
       applyCommission: false,
       startingCapital: '',
@@ -31,6 +32,27 @@ export const CalculateForm = ({ onCalculate }: CalculateFormProps) => {
   })
   const isBuyingUsdtInLira = form.watch('useExchangeRate')
   const applyCommission = form.watch('applyCommission')
+  const startingCapital = Number.parseFloat(form.watch('startingCapital'))
+  const exchangeRate = Number.parseFloat(form.watch('exchangeRate'))
+  const exchangeTaxPercent = Number.parseFloat(form.watch('exchangeTaxPercent'))
+  const effectiveExchangeRate =
+    Number.isFinite(exchangeRate) &&
+    exchangeRate > 0 &&
+    Number.isFinite(exchangeTaxPercent) &&
+    exchangeTaxPercent >= 0
+      ? exchangeRate * (1 + exchangeTaxPercent / 100)
+      : null
+  const approximateTryTotal =
+    effectiveExchangeRate !== null && Number.isFinite(startingCapital) && startingCapital > 0
+      ? startingCapital * effectiveExchangeRate
+      : null
+  const approximateTryAtBaseRate =
+    Number.isFinite(exchangeRate) &&
+    exchangeRate > 0 &&
+    Number.isFinite(startingCapital) &&
+    startingCapital > 0
+      ? startingCapital * exchangeRate
+      : null
 
   const onSubmit = (values: CalculateFormValues) => {
     onCalculate(calculateExchangeLoops(values))
@@ -116,6 +138,17 @@ export const CalculateForm = ({ onCalculate }: CalculateFormProps) => {
             control={form.control}
             name="exchangeRate"
             label="Exchange rate (TRY)"
+            description={
+              approximateTryAtBaseRate === null ? null : (
+                <span className="text-xs">
+                  ≈ ₺
+                  {approximateTryAtBaseRate.toLocaleString('en-US', {
+                    maximumFractionDigits: 2,
+                    minimumFractionDigits: 2,
+                  })}
+                </span>
+              )
+            }
             render={(field) => (
               <NumberInput
                 name={field.name}
@@ -127,6 +160,38 @@ export const CalculateForm = ({ onCalculate }: CalculateFormProps) => {
               />
             )}
           />
+
+          {!isBuyingUsdtInLira && (
+            <InputField
+              control={form.control}
+              name="exchangeTaxPercent"
+              label="Exchange tax percent %"
+              description={
+                effectiveExchangeRate === null ? null : (
+                  <span className="text-xs">
+                    Effective rate: ₺{effectiveExchangeRate.toFixed(2)}
+                    {approximateTryTotal !== null
+                      ? ` | ≈ ₺${approximateTryTotal.toLocaleString('en-US', {
+                          maximumFractionDigits: 2,
+                          minimumFractionDigits: 2,
+                        })}`
+                      : ''}
+                  </span>
+                )
+              }
+              render={(field) => (
+                <NumberInput
+                  name={field.name}
+                  value={field.value ?? ''}
+                  onBlur={field.onBlur}
+                  ref={field.ref}
+                  onChange={(value) => field.onChange(value)}
+                  allowNegative={false}
+                  startAction={<span className="text-muted-foreground text-sm">%</span>}
+                />
+              )}
+            />
+          )}
 
           {(!isBuyingUsdtInLira || applyCommission) && (
             <InputField
@@ -141,7 +206,6 @@ export const CalculateForm = ({ onCalculate }: CalculateFormProps) => {
                   ref={field.ref}
                   onChange={(value) => field.onChange(value)}
                   allowNegative={false}
-                  maxLength={3}
                   startAction={<span className="text-muted-foreground text-sm">%</span>}
                 />
               )}

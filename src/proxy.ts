@@ -3,12 +3,12 @@ import createi18nMiddleware from 'next-intl/middleware'
 import { middlewareStack, pipe } from 'nextjs-middleware-stack'
 import { appRoutingDef } from './lib/next-intl/app-routing-def'
 
-const regExp = {
+// const regExp = {
   // Login/auth UI pages (optionally locale-prefixed), e.g. /auth/login or /en/auth/login
   // publicRoutes: /^\/(?:[a-z]{2}\/)?auth(?:\/.*)?$/,
   // application page routes (optionally locale-prefixed), e.g. /, /en/customers, /ar/settings
   // protectedRoutes: /^\/(?:[a-z]{2}\/)?(?!auth(\/|$)).*/,
-}
+// }
 
 export default middlewareStack<NextRequest>([
   // AUTH GATE (run on protected routes)
@@ -19,7 +19,7 @@ export default middlewareStack<NextRequest>([
   //     req.nextUrl.pathname = pageDefs.login.href
   //     return
   //   }
-
+  //   //  protect pages based on user role
   //   const role = validation.authPayload.role
   //   if (isAllowedByHref(req.nextUrl.pathname, role)) return
   //   req.nextUrl.pathname = pageDefs.forbidden.href

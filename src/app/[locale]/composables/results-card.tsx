@@ -97,7 +97,7 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
             </div>
           </div>
 
-          <div className="border-border overflow-x-auto rounded-md border">
+          <div className="border-border max-h-[520px] overflow-auto rounded-md border">
             <table className="w-full text-left text-xs">
               <thead className="bg-muted/50">
                 <tr>

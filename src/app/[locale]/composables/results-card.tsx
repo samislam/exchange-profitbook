@@ -1,4 +1,6 @@
+import Image from 'next/image'
 import numeral from 'numeral'
+import usdtIcon from '@/media/usdt.svg'
 import { type CalculationResult } from './calculate'
 
 type ResultsCardProps = {
@@ -20,6 +22,22 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
   const profitPct =
     result && result.startingUsd > 0 ? (result.totalProfitUsd / result.startingUsd) * 100 : 0
   const profitPctLabel = `${isProfit ? '+' : '-'}${numeral(Math.abs(profitPct)).format('0,0.00')}%`
+  const totals = result
+    ? result.loops.reduce(
+        (acc, loop) => {
+          acc.buy += loop.buyAmount
+          acc.usdt += loop.usdtBought
+          acc.sellTry += loop.sellTry
+          acc.profitTry += loop.profitTry
+          return acc
+        },
+        { buy: 0, usdt: 0, sellTry: 0, profitTry: 0 }
+      )
+    : null
+  const firstLoop = result?.loops[0]
+  const buyCurrency = firstLoop?.buyCurrency
+  const buyRateTry = firstLoop?.buyRateTry ?? null
+  const sellRateTry = firstLoop?.sellRateTry ?? null
 
   return (
     <section className="w-full max-w-2xl rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-sm">
@@ -138,7 +156,12 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
                           </p>
                         </div>
                       </td>
-                      <td className="px-3 py-2">+{formatUsdt(loop.usdtBought)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1">
+                          <Image src={usdtIcon} alt="USDT" width={16} height={16} />
+                          <span>+{formatUsdt(loop.usdtBought)}</span>
+                        </div>
+                      </td>
                       <td className="border-border border-l px-3 py-2">
                         <div>
                           <p>+₺{formatTry(loop.sellTry)}</p>
@@ -170,8 +193,8 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
                               isTrendFlat
                                 ? 'flex items-center gap-1 text-gray-500 dark:text-gray-400'
                                 : isTrendUp
-                                ? 'flex items-center gap-1 text-emerald-600 dark:text-emerald-400'
-                                : 'flex items-center gap-1 text-red-600 dark:text-red-400'
+                                  ? 'flex items-center gap-1 text-emerald-600 dark:text-emerald-400'
+                                  : 'flex items-center gap-1 text-red-600 dark:text-red-400'
                             }
                           >
                             <span
@@ -179,8 +202,8 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
                                 isTrendFlat
                                   ? 'text-[10px] font-bold text-gray-500 dark:text-gray-400'
                                   : isTrendUp
-                                  ? 'text-[10px] font-bold text-emerald-600 dark:text-emerald-400'
-                                  : 'text-[10px] font-bold text-red-600 dark:text-red-400'
+                                    ? 'text-[10px] font-bold text-emerald-600 dark:text-emerald-400'
+                                    : 'text-[10px] font-bold text-red-600 dark:text-red-400'
                               }
                               aria-hidden
                             >
@@ -196,6 +219,56 @@ export const ResultsCard = ({ result }: ResultsCardProps) => {
                   )
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-[hsl(var(--border))] font-semibold">
+                  <td className="border-border border-r px-3 py-2">Total</td>
+                  <td className="px-3 py-2 text-red-600 dark:text-red-400">
+                    <div>
+                      <p>
+                        -{buyCurrency === 'USD' ? '$' : '₺'}
+                        {buyCurrency === 'USD'
+                          ? formatUsd(totals?.buy ?? 0)
+                          : formatTry(totals?.buy ?? 0)}
+                      </p>
+                      <p className="text-muted-foreground text-[10px]">
+                        {buyRateTry === null
+                          ? '(N/A)'
+                          : buyCurrency === 'USD'
+                            ? `(₺${formatTry((totals?.buy ?? 0) * buyRateTry)})`
+                            : `($${formatUsd((totals?.buy ?? 0) / buyRateTry)})`}
+                      </p>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span>+{formatUsdt(totals?.usdt ?? 0)}</span>
+                  </td>
+                  <td className="border-border border-l px-3 py-2">
+                    <div>
+                      <p>+₺{formatTry(totals?.sellTry ?? 0)}</p>
+                      <p className="text-muted-foreground text-[10px]">
+                        {sellRateTry
+                          ? `($${formatUsd((totals?.sellTry ?? 0) / sellRateTry)})`
+                          : '(N/A)'}
+                      </p>
+                    </div>
+                  </td>
+                  <td
+                    className={
+                      (totals?.profitTry ?? 0) >= 0
+                        ? 'px-3 py-2 text-emerald-600 dark:text-emerald-400'
+                        : 'px-3 py-2 text-red-600 dark:text-red-400'
+                    }
+                  >
+                    <div>
+                      <p>{formatTrySigned(totals?.profitTry ?? 0)}</p>
+                      <p className="text-muted-foreground text-[10px]">
+                        ({formatUsdSigned(result.totalProfitUsd)})
+                      </p>
+                    </div>
+                  </td>
+                  <td className="text-muted-foreground px-3 py-2">---</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>

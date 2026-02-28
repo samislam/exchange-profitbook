@@ -9,6 +9,7 @@ import { listTransactionsResponseSchema } from './transaction.schemas'
 import { listCyclesResponseSchema } from './transaction.schemas'
 import { resetCycleResponseSchema } from './transaction.schemas'
 import { transactionResponseSchema } from './transaction.schemas'
+import { undoLastTransactionResponseSchema } from './transaction.schemas'
 import { updateCycleBodySchema } from './transaction.schemas'
 
 const errorResponseSchema = t.Object({
@@ -90,6 +91,24 @@ export const transactionController = new Elysia({ prefix: '/transactions' })
       params: cycleParamsSchema,
       response: {
         200: resetCycleResponseSchema,
+        400: errorResponseSchema,
+      },
+    }
+  )
+  .post(
+    '/cycles/:id/undoLast',
+    async ({ params, status }) => {
+      try {
+        return await transactionService.undoLastTransactionInCycle(params.id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to undo last transaction'
+        return status(400, { error: message })
+      }
+    },
+    {
+      params: cycleParamsSchema,
+      response: {
+        200: undoLastTransactionResponseSchema,
         400: errorResponseSchema,
       },
     }

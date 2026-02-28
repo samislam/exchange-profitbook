@@ -1,11 +1,16 @@
 'use client'
 
+import Image from 'next/image'
 import { appApi } from '@/lib/elysia/eden'
 import { CURRENCY_SYMBOLS } from '@/constants'
 import { useEffect, useMemo, useState } from 'react'
 import { parseAsString, useQueryState } from 'nuqs'
+import { Plus, RotateCcw } from 'lucide-react'
+import usdtIcon from '@/media/usdt.svg'
 import { AppTabs } from '../../composables/app-tabs'
+import { appToast } from '@/lib/toast'
 import { CycleToolbar } from '../../composables/cycle-toolbar'
+import { TradebookCharts } from '../../composables/tradebook-charts'
 import { Input } from '@/components/ui/shadcnui/input'
 import { Button } from '@/components/ui/shadcnui/button'
 import { Select } from '@/components/ui/shadcnui/select'
@@ -30,6 +35,7 @@ import { TradebookTransactionsTable } from '../../composables/tradebook-transact
 type TransactionType = 'BUY' | 'SELL'
 type TransactionCurrency = 'USD' | 'TRY'
 type SellInputMode = 'amount-received' | 'price-per-unit'
+type PendingCycleAction = 'undo-last' | 'reset-cycle' | 'delete-cycle' | null
 
 type TradeCycle = {
   id: string
@@ -99,6 +105,8 @@ const sortByOccurredAt = (transactions: TradeTransaction[]) =>
     (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
   )
 
+const BALANCE_EXCEEDED_ERROR_PREFIX = "Amount sold can't exceed available USDT balance"
+
 const calculateRealizedTryProfit = (transactions: TradeTransaction[]) => {
   const ordered = sortByOccurredAt(transactions)
   const tryBuyLots: { remainingUsdt: number; unitCostTry: number }[] = []
@@ -163,8 +171,10 @@ const TradebookPage = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [isCycleSaving, setIsCycleSaving] = useState(false)
   const [isCycleRenaming, setIsCycleRenaming] = useState(false)
+  const [isCycleUndoing, setIsCycleUndoing] = useState(false)
   const [isCycleDeleting, setIsCycleDeleting] = useState(false)
   const [isCycleResetting, setIsCycleResetting] = useState(false)
+  const [pendingCycleAction, setPendingCycleAction] = useState<PendingCycleAction>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cycleErrorMessage, setCycleErrorMessage] = useState<string | null>(null)
   const [cycleToolbarError, setCycleToolbarError] = useState<string | null>(null)
@@ -184,6 +194,30 @@ const TradebookPage = () => {
   const [newCycleName, setNewCycleName] = useState('')
   const [cycleSearchTerm, setCycleSearchTerm] = useState('')
   const [isCycleComboboxOpen, setIsCycleComboboxOpen] = useState(false)
+  const isCycleLockedBySelection = Boolean(selectedCycle)
+
+  const getCycleUsdtBalance = (cycleName: string) =>
+    transactions.reduce((sum, transaction) => {
+      if (transaction.cycle !== cycleName) return sum
+      if (transaction.type === 'BUY') return sum + transaction.amountReceived
+      return sum - (transaction.amountSold ?? 0)
+    }, 0)
+
+  const getEffectiveCycle = () => (selectedCycle ?? transactionCycle).trim()
+
+  const availableCycleUsdtBalance = (() => {
+    const cycleName = getEffectiveCycle()
+    if (!cycleName) return 0
+    return Math.max(0, getCycleUsdtBalance(cycleName))
+  })()
+
+  const setBalanceExceededError = (balance: number) => {
+    setErrorMessage(`${BALANCE_EXCEEDED_ERROR_PREFIX} (${formatUsdt(balance)})`)
+  }
+
+  const clearBalanceExceededErrorIfAny = () => {
+    setErrorMessage((prev) => (prev?.startsWith(BALANCE_EXCEEDED_ERROR_PREFIX) ? null : prev))
+  }
 
   const loadTransactions = async () => {
     setIsLoading(true)
@@ -205,6 +239,7 @@ const TradebookPage = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load transactions'
       setErrorMessage(message)
+      appToast.fail(message)
     } finally {
       setIsLoading(false)
     }
@@ -225,8 +260,9 @@ const TradebookPage = () => {
       }
       const sorted = [...(data as TradeCycle[])].sort((a, b) => a.name.localeCompare(b.name))
       setCycles(sorted)
-    } catch {
-      // keep UI usable even if cycles fail to load
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load cycles'
+      appToast.info(message)
     }
   }
 
@@ -237,8 +273,9 @@ const TradebookPage = () => {
 
   const resetForm = () => {
     setTransactionType('BUY')
-    setTransactionCycle(cycleOptions[0]?.name ?? '')
-    setCycleSearchTerm(cycleOptions[0]?.name ?? '')
+    const defaultCycle = selectedCycle ?? cycleOptions[0]?.name ?? ''
+    setTransactionCycle(defaultCycle)
+    setCycleSearchTerm(defaultCycle)
     setTransactionCurrency('USD')
     setOccurredAt(nowDateTimeLocal())
     setTransactionValue('')
@@ -252,17 +289,18 @@ const TradebookPage = () => {
 
   const createTransaction = async () => {
     setErrorMessage(null)
+    const effectiveCycle = getEffectiveCycle()
 
     const occurredAtIso = new Date(occurredAt).toISOString()
     if (!occurredAt || Number.isNaN(new Date(occurredAt).getTime())) {
       setErrorMessage('Please provide a valid date and time')
       return
     }
-    if (!transactionCycle.trim()) {
+    if (!effectiveCycle) {
       setErrorMessage('Cycle is required')
       return
     }
-    if (!cycleOptions.some((cycleItem) => cycleItem.name === transactionCycle.trim())) {
+    if (!cycleOptions.some((cycleItem) => cycleItem.name === effectiveCycle)) {
       setErrorMessage('Please select a valid cycle from the list')
       return
     }
@@ -270,7 +308,7 @@ const TradebookPage = () => {
     const payload =
       transactionType === 'BUY'
         ? {
-            cycle: transactionCycle.trim(),
+            cycle: effectiveCycle,
             type: 'BUY' as const,
             transactionValue: Number.parseFloat(transactionValue),
             transactionCurrency,
@@ -282,7 +320,7 @@ const TradebookPage = () => {
             amountReceived: Number.parseFloat(buyAmountReceived),
           }
         : {
-            cycle: transactionCycle.trim(),
+            cycle: effectiveCycle,
             type: 'SELL' as const,
             occurredAt: occurredAtIso,
             amountSold: Number.parseFloat(sellAmountSold),
@@ -318,6 +356,11 @@ const TradebookPage = () => {
     } else {
       if (!Number.isFinite(payload.amountSold) || payload.amountSold <= 0) {
         setErrorMessage('Amount sold must be greater than 0')
+        return
+      }
+      const availableBalance = Math.max(0, getCycleUsdtBalance(effectiveCycle))
+      if (payload.amountSold > availableBalance + Number.EPSILON) {
+        setBalanceExceededError(availableBalance)
         return
       }
       if (sellInputMode === 'amount-received' && !payload.amountReceived) {
@@ -363,9 +406,11 @@ const TradebookPage = () => {
       void loadCycles()
       resetForm()
       setIsFormOpen(false)
+      appToast.success('Transaction created')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create transaction'
       setErrorMessage(message)
+      appToast.fail(message)
     } finally {
       setIsSaving(false)
     }
@@ -403,8 +448,11 @@ const TradebookPage = () => {
       setCycleSearchTerm(created.name)
       setNewCycleName('')
       setIsCycleDialogOpen(false)
+      appToast.success('Cycle created')
     } catch (error) {
-      setCycleErrorMessage(error instanceof Error ? error.message : 'Failed to create cycle')
+      const message = error instanceof Error ? error.message : 'Failed to create cycle'
+      setCycleErrorMessage(message)
+      appToast.fail(message)
     } finally {
       setIsCycleSaving(false)
     }
@@ -434,7 +482,7 @@ const TradebookPage = () => {
   )
 
   const renameSelectedCycle = async (name: string) => {
-    if (!selectedCycleItem) return
+    if (!selectedCycleItem) return false
 
     setCycleToolbarError(null)
     setIsCycleRenaming(true)
@@ -459,18 +507,20 @@ const TradebookPage = () => {
       setTransactionCycle((prev) => (prev === selectedCycleItem.name ? updated.name : prev))
       setCycleSearchTerm((prev) => (prev === selectedCycleItem.name ? updated.name : prev))
       await Promise.all([loadCycles(), loadTransactions()])
+      appToast.success('Cycle renamed')
+      return true
     } catch (error) {
-      setCycleToolbarError(error instanceof Error ? error.message : 'Failed to rename cycle')
-      throw error
+      const message = error instanceof Error ? error.message : 'Failed to rename cycle'
+      setCycleToolbarError(message)
+      appToast.fail(message)
+      return false
     } finally {
       setIsCycleRenaming(false)
     }
   }
 
   const deleteSelectedCycle = async () => {
-    if (!selectedCycleItem) return
-    const confirmed = window.confirm(`Delete cycle "${selectedCycleItem.name}"?`)
-    if (!confirmed) return
+    if (!selectedCycleItem) return false
 
     setCycleToolbarError(null)
     setIsCycleDeleting(true)
@@ -493,20 +543,54 @@ const TradebookPage = () => {
         setCycleSearchTerm('')
       }
       await Promise.all([loadCycles(), loadTransactions()])
+      appToast.success('Cycle deleted')
+      return true
     } catch (error) {
-      setCycleToolbarError(error instanceof Error ? error.message : 'Failed to delete cycle')
-      throw error
+      const message = error instanceof Error ? error.message : 'Failed to delete cycle'
+      setCycleToolbarError(message)
+      appToast.fail(message)
+      return false
     } finally {
       setIsCycleDeleting(false)
     }
   }
 
+  const undoLastTransactionInSelectedCycle = async () => {
+    if (!selectedCycleItem) return false
+
+    setCycleToolbarError(null)
+    setIsCycleUndoing(true)
+
+    try {
+      const { error } = await appApi.transactions
+        .cycles({ id: selectedCycleItem.id })
+        .undoLast.post()
+      if (error) {
+        const message =
+          typeof error.value === 'object' &&
+          error.value &&
+          'error' in error.value &&
+          typeof error.value.error === 'string'
+            ? error.value.error
+            : 'Failed to undo last transaction'
+        throw new Error(message)
+      }
+
+      await loadTransactions()
+      appToast.success('Last transaction undone')
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to undo last transaction'
+      setCycleToolbarError(message)
+      appToast.fail(message)
+      return false
+    } finally {
+      setIsCycleUndoing(false)
+    }
+  }
+
   const resetSelectedCycle = async () => {
-    if (!selectedCycleItem) return
-    const confirmed = window.confirm(
-      `Reset cycle "${selectedCycleItem.name}"?\nThis will delete all its transactions.`
-    )
-    if (!confirmed) return
+    if (!selectedCycleItem) return false
 
     setCycleToolbarError(null)
     setIsCycleResetting(true)
@@ -525,13 +609,75 @@ const TradebookPage = () => {
       }
 
       await loadTransactions()
+      appToast.success('Cycle reset')
+      return true
     } catch (error) {
-      setCycleToolbarError(error instanceof Error ? error.message : 'Failed to reset cycle')
-      throw error
+      const message = error instanceof Error ? error.message : 'Failed to reset cycle'
+      setCycleToolbarError(message)
+      appToast.fail(message)
+      return false
     } finally {
       setIsCycleResetting(false)
     }
   }
+
+  const requestUndoLastTransaction = () => {
+    if (!selectedCycleItem) return
+    setPendingCycleAction('undo-last')
+  }
+
+  const requestResetCycle = () => {
+    if (!selectedCycleItem) return
+    setPendingCycleAction('reset-cycle')
+  }
+
+  const requestDeleteCycle = () => {
+    if (!selectedCycleItem) return
+    setPendingCycleAction('delete-cycle')
+  }
+
+  const executePendingCycleAction = async () => {
+    if (!pendingCycleAction) return
+
+    let success = false
+    if (pendingCycleAction === 'undo-last') {
+      success = await undoLastTransactionInSelectedCycle()
+    } else if (pendingCycleAction === 'reset-cycle') {
+      success = await resetSelectedCycle()
+    } else if (pendingCycleAction === 'delete-cycle') {
+      success = await deleteSelectedCycle()
+    }
+
+    if (success) {
+      setPendingCycleAction(null)
+    }
+  }
+
+  const isCycleConfirmActionLoading = isCycleUndoing || isCycleResetting || isCycleDeleting
+  const cycleConfirmTitle =
+    pendingCycleAction === 'undo-last'
+      ? 'Undo last transaction?'
+      : pendingCycleAction === 'reset-cycle'
+        ? 'Reset cycle?'
+        : pendingCycleAction === 'delete-cycle'
+          ? 'Delete cycle?'
+          : ''
+  const cycleConfirmDescription =
+    pendingCycleAction === 'undo-last'
+      ? `This will remove the latest transaction from "${selectedCycleItem?.name ?? ''}".`
+      : pendingCycleAction === 'reset-cycle'
+        ? `This will remove all transactions from "${selectedCycleItem?.name ?? ''}".`
+        : pendingCycleAction === 'delete-cycle'
+          ? `This will remove all transactions and permanently delete "${selectedCycleItem?.name ?? ''}".`
+          : ''
+  const cycleConfirmActionLabel =
+    pendingCycleAction === 'undo-last'
+      ? 'Undo transaction'
+      : pendingCycleAction === 'reset-cycle'
+        ? 'Reset cycle'
+        : pendingCycleAction === 'delete-cycle'
+          ? 'Delete cycle'
+          : 'Confirm'
 
   const filteredTransactions = useMemo(() => {
     if (!selectedCycle) return transactions
@@ -672,6 +818,13 @@ const TradebookPage = () => {
     }
   }, [transactionCycle, cycleOptions])
 
+  useEffect(() => {
+    if (!selectedCycle) return
+    setTransactionCycle(selectedCycle)
+    setCycleSearchTerm(selectedCycle)
+    setIsCycleComboboxOpen(false)
+  }, [selectedCycle])
+
   const filteredCycleOptions = useMemo(() => {
     const q = cycleSearchTerm.trim().toLowerCase()
     if (!q) return cycleOptions
@@ -699,252 +852,367 @@ const TradebookPage = () => {
           <CycleToolbar
             selectedCycleName={selectedCycle ?? null}
             onRenameCycle={renameSelectedCycle}
-            onDeleteCycle={deleteSelectedCycle}
-            onResetCycle={resetSelectedCycle}
+            onDeleteCycle={async () => requestDeleteCycle()}
+            onResetCycle={async () => requestResetCycle()}
             isRenaming={isCycleRenaming}
             isDeleting={isCycleDeleting}
             isResetting={isCycleResetting}
           />
-          <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-            <DialogTrigger asChild>
-              <Button variant="default">Create new transaction</Button>
-            </DialogTrigger>
+          <div className="flex items-center gap-2">
+            {selectedCycleItem && (
+              <Button
+                variant="outline"
+                onClick={() => requestUndoLastTransaction()}
+                disabled={isCycleUndoing}
+              >
+                <RotateCcw className="h-4 w-4" />
+                {isCycleUndoing ? 'Undoing...' : 'Undo last transaction'}
+              </Button>
+            )}
+            <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+              <DialogTrigger asChild>
+                <Button variant="default">
+                  <Plus className="h-4 w-4" />
+                  Create new transaction
+                </Button>
+              </DialogTrigger>
 
-            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Create transaction</DialogTitle>
-                <DialogDescription>Add a BUY or SELL trade entry.</DialogDescription>
-              </DialogHeader>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <p className="mb-2 text-sm font-semibold">Type</p>
-                  <Select
-                    value={transactionType}
-                    onValueChange={(value) => setTransactionType(value as TransactionType)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="BUY">BUY</SelectItem>
-                      <SelectItem value="SELL">SELL</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-sm font-semibold">Cycle</p>
-                  <div className="relative">
-                    <Input
-                      value={isCycleComboboxOpen ? cycleSearchTerm : transactionCycle}
-                      onFocus={() => {
-                        setCycleSearchTerm(transactionCycle)
-                        setIsCycleComboboxOpen(true)
-                      }}
-                      onBlur={() => {
-                        setTimeout(() => setIsCycleComboboxOpen(false), 120)
-                      }}
-                      onChange={(event) => {
-                        setCycleSearchTerm(event.target.value)
-                        setTransactionCycle('')
-                      }}
-                      placeholder="Search cycle..."
-                    />
-                    {isCycleComboboxOpen && (
-                      <div className="bg-popover text-popover-foreground absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-md border p-1 shadow-md">
-                        {filteredCycleOptions.length === 0 ? (
-                          <p className="text-muted-foreground px-2 py-1.5 text-sm">
-                            No cycles found
-                          </p>
-                        ) : (
-                          filteredCycleOptions.map((cycleItem) => (
-                            <button
-                              key={cycleItem.id}
-                              type="button"
-                              className="hover:bg-accent hover:text-accent-foreground w-full rounded px-2 py-1.5 text-left text-sm"
-                              onMouseDown={(event) => {
-                                event.preventDefault()
-                                setTransactionCycle(cycleItem.name)
-                                setCycleSearchTerm(cycleItem.name)
-                                setIsCycleComboboxOpen(false)
-                              }}
-                            >
-                              {cycleItem.name}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-sm font-semibold">Datetime</p>
-                  <Input
-                    type="datetime-local"
-                    value={occurredAt}
-                    onChange={(event) => setOccurredAt(event.target.value)}
-                  />
-                </div>
-
-                {transactionType === 'BUY' ? (
-                  <>
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>Create transaction</DialogTitle>
+                  <DialogDescription>Add a BUY or SELL trade entry.</DialogDescription>
+                </DialogHeader>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    void createTransaction()
+                  }}
+                >
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
-                      <p className="mb-2 text-sm font-semibold">Transaction value</p>
-                      <NumberInput
-                        value={transactionValue}
-                        onChange={setTransactionValue}
-                        startAction={
-                          <span className="text-muted-foreground text-sm">
-                            {CURRENCY_SYMBOLS[transactionCurrency]}
-                          </span>
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-sm font-semibold">Transaction currency</p>
+                      <p className="mb-2 text-sm font-semibold">Type</p>
                       <Select
-                        value={transactionCurrency}
-                        onValueChange={(value) =>
-                          setTransactionCurrency(value as TransactionCurrency)
-                        }
+                        value={transactionType}
+                        onValueChange={(value) => setTransactionType(value as TransactionType)}
                       >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="USD">USD</SelectItem>
-                          <SelectItem value="TRY">TRY</SelectItem>
+                          <SelectItem value="BUY">BUY</SelectItem>
+                          <SelectItem value="SELL">SELL</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div>
-                      <p className="mb-2 text-sm font-semibold">Amount received (USDT)</p>
-                      <NumberInput
-                        value={buyAmountReceived}
-                        onChange={setBuyAmountReceived}
-                        startAction={
-                          <span className="text-muted-foreground text-sm">
-                            {CURRENCY_SYMBOLS.USDT}
-                          </span>
+                      <p
+                        className={
+                          isCycleLockedBySelection
+                            ? 'text-muted-foreground mb-2 text-sm font-semibold'
+                            : 'mb-2 text-sm font-semibold'
                         }
-                      />
-                    </div>
-
-                    {transactionCurrency === 'USD' && (
-                      <div>
-                        <p className="mb-2 text-sm font-semibold">USD/TRY rate at buy</p>
-                        <NumberInput
-                          value={buyUsdTryRateAtBuy}
-                          onChange={setBuyUsdTryRateAtBuy}
-                          startAction={
-                            <span className="text-muted-foreground text-sm">
-                              {CURRENCY_SYMBOLS.TRY}
-                            </span>
+                      >
+                        Cycle
+                      </p>
+                      <div className="relative">
+                        <Input
+                          value={isCycleComboboxOpen ? cycleSearchTerm : transactionCycle}
+                          onFocus={() => {
+                            if (isCycleLockedBySelection) return
+                            setCycleSearchTerm(transactionCycle)
+                            setIsCycleComboboxOpen(true)
+                          }}
+                          onBlur={() => {
+                            if (isCycleLockedBySelection) return
+                            setTimeout(() => setIsCycleComboboxOpen(false), 120)
+                          }}
+                          onChange={(event) => {
+                            if (isCycleLockedBySelection) return
+                            setCycleSearchTerm(event.target.value)
+                            setTransactionCycle('')
+                          }}
+                          placeholder="Search cycle..."
+                          disabled={isCycleLockedBySelection}
+                          readOnly={isCycleLockedBySelection}
+                          rootClassname={
+                            isCycleLockedBySelection
+                              ? 'bg-muted/70 border-border cursor-not-allowed opacity-80'
+                              : undefined
                           }
+                          className={isCycleLockedBySelection ? 'text-muted-foreground' : undefined}
                         />
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <p className="mb-2 text-sm font-semibold">Amount sold (USDT)</p>
-                      <NumberInput
-                        value={sellAmountSold}
-                        onChange={setSellAmountSold}
-                        startAction={
-                          <span className="text-muted-foreground text-sm">
-                            {CURRENCY_SYMBOLS.USDT}
-                          </span>
-                        }
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                      <div>
-                        <p className="mb-2 text-sm font-semibold">
-                          {sellInputMode === 'amount-received'
-                            ? 'Amount received (TRY)'
-                            : 'Price per unit (TRY)'}
-                        </p>
-                        {sellInputMode === 'amount-received' ? (
-                          <NumberInput
-                            value={sellAmountReceived}
-                            onChange={setSellAmountReceived}
-                            startAction={
-                              <span className="text-muted-foreground text-sm">
-                                {CURRENCY_SYMBOLS.TRY}
-                              </span>
-                            }
-                          />
-                        ) : (
-                          <NumberInput
-                            value={sellPricePerUnit}
-                            onChange={setSellPricePerUnit}
-                            startAction={
-                              <span className="text-muted-foreground text-sm">
-                                {CURRENCY_SYMBOLS.TRY}
-                              </span>
-                            }
-                          />
+                        {isCycleComboboxOpen && !isCycleLockedBySelection && (
+                          <div className="bg-popover text-popover-foreground absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-md border p-1 shadow-md">
+                            {filteredCycleOptions.length === 0 ? (
+                              <p className="text-muted-foreground px-2 py-1.5 text-sm">
+                                No cycles found
+                              </p>
+                            ) : (
+                              filteredCycleOptions.map((cycleItem) => (
+                                <button
+                                  key={cycleItem.id}
+                                  type="button"
+                                  className="hover:bg-accent hover:text-accent-foreground w-full rounded px-2 py-1.5 text-left text-sm"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    setTransactionCycle(cycleItem.name)
+                                    setCycleSearchTerm(cycleItem.name)
+                                    setIsCycleComboboxOpen(false)
+                                  }}
+                                >
+                                  {cycleItem.name}
+                                </button>
+                              ))
+                            )}
+                          </div>
                         )}
                       </div>
-
-                      <ToggleGroup
-                        type="single"
-                        value={sellInputMode}
-                        onValueChange={(value) => {
-                          if (!value) return
-                          const nextMode = value as SellInputMode
-                          setSellInputMode(nextMode)
-                          if (nextMode === 'amount-received') {
-                            setSellPricePerUnit('')
-                          } else {
-                            setSellAmountReceived('')
-                          }
-                        }}
-                        className="justify-start md:justify-end"
-                      >
-                        <ToggleGroupItem value="amount-received">Amount received</ToggleGroupItem>
-                        <ToggleGroupItem value="price-per-unit">Price per unit</ToggleGroupItem>
-                      </ToggleGroup>
                     </div>
-                  </>
-                )}
-              </div>
 
-              {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
+                    <div>
+                      <p className="mb-2 text-sm font-semibold">Datetime</p>
+                      <Input
+                        type="datetime-local"
+                        value={occurredAt}
+                        onChange={(event) => setOccurredAt(event.target.value)}
+                      />
+                    </div>
 
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    resetForm()
-                    setIsFormOpen(false)
-                    setErrorMessage(null)
-                  }}
-                  disabled={isSaving}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={() => void createTransaction()} disabled={isSaving}>
-                  {isSaving ? 'Creating...' : 'Create'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                    {transactionType === 'BUY' ? (
+                      <>
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Transaction value</p>
+                          <NumberInput
+                            value={transactionValue}
+                            onChange={setTransactionValue}
+                            startAction={
+                              <span className="text-muted-foreground text-sm">
+                                {CURRENCY_SYMBOLS[transactionCurrency]}
+                              </span>
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Transaction currency</p>
+                          <Select
+                            value={transactionCurrency}
+                            onValueChange={(value) =>
+                              setTransactionCurrency(value as TransactionCurrency)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="USD">USD</SelectItem>
+                              <SelectItem value="TRY">TRY</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Amount received (USDT)</p>
+                          <NumberInput
+                            value={buyAmountReceived}
+                            onChange={setBuyAmountReceived}
+                            startAction={
+                              <span className="text-muted-foreground text-sm">
+                                {CURRENCY_SYMBOLS.USDT}
+                              </span>
+                            }
+                          />
+                        </div>
+
+                        {transactionCurrency === 'USD' && (
+                          <div>
+                            <p className="mb-2 text-sm font-semibold">USD/TRY rate at buy</p>
+                            <NumberInput
+                              value={buyUsdTryRateAtBuy}
+                              onChange={setBuyUsdTryRateAtBuy}
+                              startAction={
+                                <span className="text-muted-foreground text-sm">
+                                  {CURRENCY_SYMBOLS.TRY}
+                                </span>
+                              }
+                            />
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Amount sold (USDT)</p>
+                          <NumberInput
+                            value={sellAmountSold}
+                            onChange={(value) => {
+                              if (!value) {
+                                setSellAmountSold('')
+                                clearBalanceExceededErrorIfAny()
+                                return
+                              }
+
+                              const parsed = Number.parseFloat(value)
+                              if (!Number.isFinite(parsed)) {
+                                setSellAmountSold(value)
+                                return
+                              }
+
+                              if (parsed > availableCycleUsdtBalance + Number.EPSILON) {
+                                setSellAmountSold(availableCycleUsdtBalance.toString())
+                                setBalanceExceededError(availableCycleUsdtBalance)
+                                return
+                              }
+
+                              setSellAmountSold(value)
+                              clearBalanceExceededErrorIfAny()
+                            }}
+                            startAction={
+                              <span className="text-muted-foreground text-sm">
+                                {CURRENCY_SYMBOLS.USDT}
+                              </span>
+                            }
+                            endAction={
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground text-xs font-semibold"
+                                onClick={() => {
+                                  const maxValue = availableCycleUsdtBalance
+                                    .toFixed(4)
+                                    .replace(/\.?0+$/, '')
+                                  setSellAmountSold(maxValue)
+                                  clearBalanceExceededErrorIfAny()
+                                }}
+                              >
+                                MAX
+                              </button>
+                            }
+                          />
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            Available USDT balance: {formatUsdt(availableCycleUsdtBalance)} USDT
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                          <div>
+                            <p className="mb-2 text-sm font-semibold">
+                              {sellInputMode === 'amount-received'
+                                ? 'Amount received (TRY)'
+                                : 'Price per unit (TRY)'}
+                            </p>
+                            {sellInputMode === 'amount-received' ? (
+                              <NumberInput
+                                value={sellAmountReceived}
+                                onChange={setSellAmountReceived}
+                                startAction={
+                                  <span className="text-muted-foreground text-sm">
+                                    {CURRENCY_SYMBOLS.TRY}
+                                  </span>
+                                }
+                              />
+                            ) : (
+                              <NumberInput
+                                value={sellPricePerUnit}
+                                onChange={setSellPricePerUnit}
+                                startAction={
+                                  <span className="text-muted-foreground text-sm">
+                                    {CURRENCY_SYMBOLS.TRY}
+                                  </span>
+                                }
+                              />
+                            )}
+                          </div>
+
+                          <ToggleGroup
+                            type="single"
+                            value={sellInputMode}
+                            onValueChange={(value) => {
+                              if (!value) return
+                              const nextMode = value as SellInputMode
+                              setSellInputMode(nextMode)
+                              if (nextMode === 'amount-received') {
+                                setSellPricePerUnit('')
+                              } else {
+                                setSellAmountReceived('')
+                              }
+                            }}
+                            className="justify-start md:justify-end"
+                          >
+                            <ToggleGroupItem value="amount-received">
+                              Amount received
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value="price-per-unit">Price per unit</ToggleGroupItem>
+                          </ToggleGroup>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {errorMessage && <p className="mt-3 text-sm text-red-600">{errorMessage}</p>}
+
+                  <DialogFooter className="mt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        resetForm()
+                        setIsFormOpen(false)
+                        setErrorMessage(null)
+                      }}
+                      disabled={isSaving}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={isSaving}>
+                      {isSaving ? 'Creating...' : 'Create'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
         {cycleToolbarError && <p className="mt-2 text-sm text-red-600">{cycleToolbarError}</p>}
+        <Dialog
+          open={pendingCycleAction !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingCycleAction(null)
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{cycleConfirmTitle}</DialogTitle>
+              <DialogDescription>{cycleConfirmDescription}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPendingCycleAction(null)}
+                disabled={isCycleConfirmActionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant={pendingCycleAction === 'delete-cycle' ? 'destructive' : 'default'}
+                onClick={() => void executePendingCycleAction()}
+                disabled={isCycleConfirmActionLoading}
+              >
+                {isCycleConfirmActionLoading ? 'Working...' : cycleConfirmActionLabel}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
           <aside className="space-y-3">
             <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
-              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
-                Current USDT balance
+              <p className="flex items-center gap-1 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
+                Current USDT
+                <Image src={usdtIcon} alt="USDT" width={14} height={14} />
+                balance
               </p>
               <p className="mt-2 text-3xl font-bold text-emerald-700 dark:text-emerald-300">
                 {formatUsdt(stats.currentUsdtBalance)}
@@ -952,12 +1220,18 @@ const TradebookPage = () => {
             </div>
 
             <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
-              <p className="text-muted-foreground text-xs font-semibold uppercase">Total bought</p>
+              <p className="text-muted-foreground flex items-center gap-1 text-xs font-semibold uppercase">
+                Total bought
+                <Image src={usdtIcon} alt="USDT" width={14} height={14} />
+              </p>
               <p className="mt-1 text-xl font-bold">{formatUsdt(stats.boughtUsdt)} USDT</p>
             </div>
 
             <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
-              <p className="text-muted-foreground text-xs font-semibold uppercase">Total sold</p>
+              <p className="text-muted-foreground flex items-center gap-1 text-xs font-semibold uppercase">
+                Total sold
+                <Image src={usdtIcon} alt="USDT" width={14} height={14} />
+              </p>
               <p className="mt-1 text-xl font-bold">{formatUsdt(stats.soldUsdt)} USDT</p>
             </div>
 
@@ -1017,6 +1291,7 @@ const TradebookPage = () => {
                 >
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline">
+                      <Plus className="h-4 w-4" />
                       New Cycle
                     </Button>
                   </DialogTrigger>
@@ -1025,25 +1300,36 @@ const TradebookPage = () => {
                       <DialogTitle>Create cycle</DialogTitle>
                       <DialogDescription>Group multiple trades under one cycle.</DialogDescription>
                     </DialogHeader>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold">Cycle name</p>
-                      <Input
-                        value={newCycleName}
-                        onChange={(event) => setNewCycleName(event.target.value)}
-                        placeholder={nextCycleName}
-                      />
-                      {cycleErrorMessage && (
-                        <p className="text-sm text-red-600">{cycleErrorMessage}</p>
-                      )}
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsCycleDialogOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={() => void createCycle()} disabled={isCycleSaving}>
-                        {isCycleSaving ? 'Creating...' : 'Create'}
-                      </Button>
-                    </DialogFooter>
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void createCycle()
+                      }}
+                    >
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold">Cycle name</p>
+                        <Input
+                          value={newCycleName}
+                          onChange={(event) => setNewCycleName(event.target.value)}
+                          placeholder={nextCycleName}
+                        />
+                        {cycleErrorMessage && (
+                          <p className="text-sm text-red-600">{cycleErrorMessage}</p>
+                        )}
+                      </div>
+                      <DialogFooter className="mt-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setIsCycleDialogOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" disabled={isCycleSaving}>
+                          {isCycleSaving ? 'Creating...' : 'Create'}
+                        </Button>
+                      </DialogFooter>
+                    </form>
                   </DialogContent>
                 </Dialog>
               </div>
@@ -1108,8 +1394,7 @@ const TradebookPage = () => {
                           )}
                         </p>
                         <p className="text-muted-foreground text-[11px]">
-                          {formatDateOnly(item.createdAt)} | {item.tradeCount} trades | +
-                          {formatUsdt(item.usdtIn)} / -{formatUsdt(item.usdtOut)} USDT
+                          {formatDateOnly(item.createdAt)} | {item.tradeCount} trades
                         </p>
                       </div>
                       <p
@@ -1132,11 +1417,14 @@ const TradebookPage = () => {
             {isLoading ? (
               <p className="text-muted-foreground text-sm">Loading transactions...</p>
             ) : (
-              <TradebookTransactionsTable
-                rows={ledgerRows}
-                initialRows={10}
-                showCycleColumn={!selectedCycle}
-              />
+              <>
+                <TradebookTransactionsTable
+                  rows={ledgerRows}
+                  initialRows={10}
+                  showCycleColumn={!selectedCycle}
+                />
+                <TradebookCharts transactions={filteredTransactions} />
+              </>
             )}
           </div>
         </div>

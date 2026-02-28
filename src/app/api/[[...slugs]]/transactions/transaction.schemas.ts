@@ -77,3 +77,8 @@ export const resetCycleResponseSchema = t.Object({
   success: t.Boolean(),
   deletedTransactions: t.Number(),
 })
+
+export const undoLastTransactionResponseSchema = t.Object({
+  success: t.Boolean(),
+  deletedTransactionId: t.String(),
+})

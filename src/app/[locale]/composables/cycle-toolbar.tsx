@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/shadcnui/input'
 import { Button } from '@/components/ui/shadcnui/button'
+import { RotateCcw, Trash2 } from 'lucide-react'
 
 type CycleToolbarProps = {
   selectedCycleName: string | null
-  onRenameCycle: (name: string) => Promise<void>
+  onRenameCycle: (name: string) => Promise<boolean>
   onDeleteCycle: () => Promise<void>
   onResetCycle: () => Promise<void>
   isRenaming: boolean
@@ -50,7 +51,7 @@ export const CycleToolbar = ({
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-6">
       {isEditing ? (
         <Input
           autoFocus
@@ -83,16 +84,23 @@ export const CycleToolbar = ({
 
       {hasSelectedCycle && (
         <>
-          <Button variant="outline" disabled={!canReset} onClick={() => void onResetCycle()}>
+          <Button
+            variant="outline"
+            className="border-amber-300 text-amber-700 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-800 dark:border-amber-700/70 dark:text-amber-300 dark:hover:bg-amber-900/20 dark:hover:text-amber-200"
+            disabled={!canReset}
+            onClick={() => void onResetCycle()}
+          >
+            <RotateCcw className="h-4 w-4" />
             {isResetting ? 'Resetting...' : 'Reset cycle'}
           </Button>
 
           <Button
             variant="outline"
-            className="text-red-600 hover:text-red-700"
+            className="border-red-300 text-red-600 hover:border-red-400 hover:bg-red-50 hover:text-red-700 dark:border-red-700/70 dark:text-red-300 dark:hover:bg-red-900/20 dark:hover:text-red-200"
             disabled={!canDelete}
             onClick={() => void onDeleteCycle()}
           >
+            <Trash2 className="h-4 w-4" />
             {isDeleting ? 'Deleting...' : 'Delete cycle'}
           </Button>
         </>

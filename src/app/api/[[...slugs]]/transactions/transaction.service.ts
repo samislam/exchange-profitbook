@@ -105,16 +105,23 @@ export class TransactionService {
   }
 
   async deleteCycle(id: string) {
-    const transactionsCount = await prismaClient.tradeTransaction.count({
-      where: { cycleId: id },
-    })
+    await prismaClient.$transaction(async (tx) => {
+      const cycle = await tx.tradeCycle.findUnique({
+        where: { id },
+        select: { id: true },
+      })
 
-    if (transactionsCount > 0) {
-      throw new Error('Cannot delete a cycle that has transactions')
-    }
+      if (!cycle) {
+        throw new Error('Cycle not found')
+      }
 
-    await prismaClient.tradeCycle.delete({
-      where: { id },
+      await tx.tradeTransaction.deleteMany({
+        where: { cycleId: id },
+      })
+
+      await tx.tradeCycle.delete({
+        where: { id },
+      })
     })
 
     return { success: true }
@@ -137,6 +144,36 @@ export class TransactionService {
     return {
       success: true,
       deletedTransactions: deleted.count,
+    }
+  }
+
+  async undoLastTransactionInCycle(id: string) {
+    const cycle = await prismaClient.tradeCycle.findUnique({
+      where: { id },
+      select: { id: true },
+    })
+
+    if (!cycle) {
+      throw new Error('Cycle not found')
+    }
+
+    const lastTransaction = await prismaClient.tradeTransaction.findFirst({
+      where: { cycleId: id },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
+    })
+
+    if (!lastTransaction) {
+      throw new Error('No transactions found in this cycle')
+    }
+
+    await prismaClient.tradeTransaction.delete({
+      where: { id: lastTransaction.id },
+    })
+
+    return {
+      success: true,
+      deletedTransactionId: lastTransaction.id,
     }
   }
 

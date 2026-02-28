@@ -10,6 +10,7 @@ import { LayoutProps } from '@/lib/next/next-types'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
 import { getStaticData } from '@/lib/tolgee/tolgee-shared'
 import { TolgeeNextProvider } from '@/lib/tolgee/tolgee-client'
+import { Toaster } from '@/components/ui/shadcnui/sonner'
 import { MetadataGenerateFn } from '@/lib/next/metadata-generator'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { EnvironmentRibbon } from '@/components/common/environment-ribbon'
@@ -38,6 +39,7 @@ export default async function RootLayout(props: LayoutProps) {
                 <NuqsAdapter>
                   <EnvironmentRibbon environment="none" />
                   {children}
+                  <Toaster />
                   <ReactQueryDevtools initialIsOpen={false} />
                   <TolgeeLoadingScreen />
                   <ClientPlugger />

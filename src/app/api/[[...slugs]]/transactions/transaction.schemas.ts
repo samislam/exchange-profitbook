@@ -1,6 +1,10 @@
 import { t } from 'elysia'
 
-export const transactionTypeSchema = t.Union([t.Literal('BUY'), t.Literal('SELL')])
+export const transactionTypeSchema = t.Union([
+  t.Literal('BUY'),
+  t.Literal('SELL'),
+  t.Literal('CYCLE_SETTLEMENT'),
+])
 export const transactionCurrencySchema = t.Union([t.Literal('USD'), t.Literal('TRY')])
 export const cycleNameSchema = t.String({ minLength: 1, maxLength: 100 })
 
@@ -25,9 +29,18 @@ export const createSellTransactionBodySchema = t.Object({
   commissionPercent: t.Optional(t.Number({ minimum: 0 })),
 })
 
+export const createCycleSettlementTransactionBodySchema = t.Object({
+  type: t.Literal('CYCLE_SETTLEMENT'),
+  fromCycle: cycleNameSchema,
+  toCycle: cycleNameSchema,
+  occurredAt: t.Optional(t.String({ format: 'date-time' })),
+  amount: t.Number({ minimum: 0.0000001 }),
+})
+
 export const createTransactionBodySchema = t.Union([
   createBuyTransactionBodySchema,
   createSellTransactionBodySchema,
+  createCycleSettlementTransactionBodySchema,
 ])
 
 export const transactionResponseSchema = t.Object({
@@ -84,3 +97,8 @@ export const undoLastTransactionResponseSchema = t.Object({
   success: t.Boolean(),
   deletedTransactionId: t.String(),
 })
+
+export const createTransactionResponseSchema = t.Union([
+  transactionResponseSchema,
+  t.Array(transactionResponseSchema),
+])

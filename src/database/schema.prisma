@@ -18,6 +18,7 @@ datasource db {
 enum TransactionType {
   BUY
   SELL
+  CYCLE_SETTLEMENT
 }
 
 enum TransactionCurrency {

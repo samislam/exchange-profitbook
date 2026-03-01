@@ -1,0 +1,1 @@
+ALTER TYPE "TransactionType" ADD VALUE 'CYCLE_SETTLEMENT';

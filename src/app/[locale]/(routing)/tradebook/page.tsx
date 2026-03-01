@@ -34,7 +34,7 @@ import { TradebookCharts } from '../../composables/tradebook-charts'
 import { LogoutIconButton } from '@/components/common/logout-icon-button'
 import { TradebookTransactionsTable } from '../../composables/tradebook-transactions-table'
 
-type TransactionType = 'BUY' | 'SELL'
+type TransactionType = 'BUY' | 'SELL' | 'CYCLE_SETTLEMENT'
 type TransactionCurrency = 'USD' | 'TRY'
 type BuyInputMode = 'amount-received' | 'price-per-unit'
 type SellInputMode = 'amount-received' | 'price-per-unit'
@@ -201,6 +201,8 @@ const TradebookPage = () => {
   const [sellFee, setSellFee] = useState('')
   const [sellFeeUnit, setSellFeeUnit] = useState<SellFeeUnit>('usdt')
   const [sellInputMode, setSellInputMode] = useState<SellInputMode>('price-per-unit')
+  const [settlementToCycle, setSettlementToCycle] = useState('')
+  const [settlementAmount, setSettlementAmount] = useState('')
   const [newCycleName, setNewCycleName] = useState('')
   const [cycleSearchTerm, setCycleSearchTerm] = useState('')
   const [isCycleComboboxOpen, setIsCycleComboboxOpen] = useState(false)
@@ -210,7 +212,8 @@ const TradebookPage = () => {
     transactions.reduce((sum, transaction) => {
       if (transaction.cycle !== cycleName) return sum
       if (transaction.type === 'BUY') return sum + transaction.amountReceived
-      return sum - (transaction.amountSold ?? 0)
+      if (transaction.type === 'SELL') return sum - (transaction.amountSold ?? 0)
+      return sum + transaction.amountReceived - (transaction.amountSold ?? 0)
     }, 0)
 
   const getEffectiveCycle = () => (selectedCycle ?? transactionCycle).trim()
@@ -298,6 +301,8 @@ const TradebookPage = () => {
     setSellFee('')
     setSellFeeUnit('usdt')
     setSellInputMode('price-per-unit')
+    setSettlementToCycle('')
+    setSettlementAmount('')
   }
 
   const createTransaction = async () => {
@@ -385,31 +390,39 @@ const TradebookPage = () => {
               commissionPercent: buyCommissionPercent,
             }
           })()
-        : {
-            cycle: effectiveCycle,
-            type: 'SELL' as const,
-            occurredAt: occurredAtIso,
-            amountSold: Number.parseFloat(sellAmountSold),
-            amountReceived:
-              sellInputMode === 'amount-received' && sellAmountReceived
-                ? Number.parseFloat(sellAmountReceived)
-                : undefined,
-            pricePerUnit:
-              sellInputMode === 'price-per-unit' && sellPricePerUnit
-                ? Number.parseFloat(sellPricePerUnit)
-                : undefined,
-            commissionPercent: (() => {
-              if (!sellFee) return undefined
-              const feeValue = Number.parseFloat(sellFee)
-              if (!Number.isFinite(feeValue)) return Number.NaN
-              if (sellFeeUnit === 'percent') return feeValue
+        : transactionType === 'SELL'
+          ? {
+              cycle: effectiveCycle,
+              type: 'SELL' as const,
+              occurredAt: occurredAtIso,
+              amountSold: Number.parseFloat(sellAmountSold),
+              amountReceived:
+                sellInputMode === 'amount-received' && sellAmountReceived
+                  ? Number.parseFloat(sellAmountReceived)
+                  : undefined,
+              pricePerUnit:
+                sellInputMode === 'price-per-unit' && sellPricePerUnit
+                  ? Number.parseFloat(sellPricePerUnit)
+                  : undefined,
+              commissionPercent: (() => {
+                if (!sellFee) return undefined
+                const feeValue = Number.parseFloat(sellFee)
+                if (!Number.isFinite(feeValue)) return Number.NaN
+                if (sellFeeUnit === 'percent') return feeValue
 
-              const soldUsdt = Number.parseFloat(sellAmountSold)
+                const soldUsdt = Number.parseFloat(sellAmountSold)
 
-              if (!Number.isFinite(soldUsdt) || soldUsdt <= 0) return Number.NaN
-              return (feeValue / soldUsdt) * 100
-            })(),
-          }
+                if (!Number.isFinite(soldUsdt) || soldUsdt <= 0) return Number.NaN
+                return (feeValue / soldUsdt) * 100
+              })(),
+            }
+          : {
+              type: 'CYCLE_SETTLEMENT' as const,
+              occurredAt: occurredAtIso,
+              fromCycle: effectiveCycle,
+              toCycle: settlementToCycle.trim(),
+              amount: Number.parseFloat(settlementAmount),
+            }
 
     if (payload.type === 'BUY') {
       if (!Number.isFinite(payload.transactionValue) || payload.transactionValue <= 0) {
@@ -450,7 +463,7 @@ const TradebookPage = () => {
         setErrorMessage('Fee must be between 0 and less than 100')
         return
       }
-    } else {
+    } else if (payload.type === 'SELL') {
       if (!Number.isFinite(payload.amountSold) || payload.amountSold <= 0) {
         setErrorMessage('Amount sold must be greater than 0')
         return
@@ -484,6 +497,34 @@ const TradebookPage = () => {
         setErrorMessage('Fee must be 0 or greater')
         return
       }
+    } else {
+      if (!payload.fromCycle) {
+        setErrorMessage('Source cycle is required')
+        return
+      }
+      if (!payload.toCycle) {
+        setErrorMessage('Destination cycle is required')
+        return
+      }
+      if (payload.fromCycle === payload.toCycle) {
+        setErrorMessage('Source and destination cycles must be different')
+        return
+      }
+      if (!cycleOptions.some((cycleItem) => cycleItem.name === payload.toCycle)) {
+        setErrorMessage('Please select a valid destination cycle from the list')
+        return
+      }
+      if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+        setErrorMessage('Settlement amount must be greater than 0')
+        return
+      }
+      const sourceBalance = Math.max(0, getCycleUsdtBalance(payload.fromCycle))
+      if (payload.amount > sourceBalance + Number.EPSILON) {
+        setErrorMessage(
+          `Settlement amount exceeds source cycle balance (${formatUsdt(sourceBalance)} USDT)`
+        )
+        return
+      }
     }
 
     setIsSaving(true)
@@ -501,7 +542,10 @@ const TradebookPage = () => {
         throw new Error(message)
       }
 
-      setTransactions((prev) => [...prev, data as TradeTransaction])
+      const createdTransactions = Array.isArray(data)
+        ? (data as TradeTransaction[])
+        : [data as TradeTransaction]
+      setTransactions((prev) => [...prev, ...createdTransactions])
       void loadCycles()
       resetForm()
       setIsFormOpen(false)
@@ -818,9 +862,32 @@ const TradebookPage = () => {
         }
       }
 
-      const soldUsdt = transaction.amountSold ?? 0
-      const usdtDelta = -soldUsdt
-      const tryDelta = transaction.amountReceived
+      if (transaction.type === 'SELL') {
+        const soldUsdt = transaction.amountSold ?? 0
+        const usdtDelta = -soldUsdt
+        const tryDelta = transaction.amountReceived
+        runningUsdt += usdtDelta
+
+        return {
+          no: index + 1,
+          id: transaction.id,
+          cycle: transaction.cycle,
+          occurredAt: transaction.occurredAt,
+          type: 'SELL' as const,
+          paidLabel: `-${CURRENCY_SYMBOLS.USDT} ${formatUsdt(soldUsdt)}`,
+          receivedLabel: `+${CURRENCY_SYMBOLS.TRY}${formatTry(transaction.amountReceived)}`,
+          unitPriceTry: transaction.pricePerUnit ?? transaction.effectiveRateTry,
+          commissionPercent: transaction.commissionPercent,
+          usdtDelta,
+          tryDelta,
+          runningUsdtBalance: runningUsdt,
+        }
+      }
+
+      const settlementOut = transaction.amountSold ?? 0
+      const settlementIn = transaction.amountReceived
+      const usdtDelta = settlementIn - settlementOut
+      const tryDelta = 0
       runningUsdt += usdtDelta
 
       return {
@@ -828,11 +895,13 @@ const TradebookPage = () => {
         id: transaction.id,
         cycle: transaction.cycle,
         occurredAt: transaction.occurredAt,
-        type: 'SELL' as const,
-        paidLabel: `-${CURRENCY_SYMBOLS.USDT} ${formatUsdt(soldUsdt)}`,
-        receivedLabel: `+${CURRENCY_SYMBOLS.TRY}${formatTry(transaction.amountReceived)}`,
-        unitPriceTry: transaction.pricePerUnit ?? transaction.effectiveRateTry,
-        commissionPercent: transaction.commissionPercent,
+        type: 'CYCLE_SETTLEMENT' as const,
+        paidLabel:
+          settlementOut > 0 ? `-${CURRENCY_SYMBOLS.USDT} ${formatUsdt(settlementOut)}` : '-',
+        receivedLabel:
+          settlementIn > 0 ? `+${CURRENCY_SYMBOLS.USDT} ${formatUsdt(settlementIn)}` : '-',
+        unitPriceTry: null,
+        commissionPercent: null,
         usdtDelta,
         tryDelta,
         runningUsdtBalance: runningUsdt,
@@ -853,7 +922,11 @@ const TradebookPage = () => {
       .filter((transaction) => transaction.type === 'SELL')
       .reduce((sum, transaction) => sum + transaction.amountReceived, 0)
 
-    const currentUsdtBalance = boughtUsdt - soldUsdt
+    const currentUsdtBalance = filteredTransactions.reduce((sum, transaction) => {
+      if (transaction.type === 'BUY') return sum + transaction.amountReceived
+      if (transaction.type === 'SELL') return sum - (transaction.amountSold ?? 0)
+      return sum + transaction.amountReceived - (transaction.amountSold ?? 0)
+    }, 0)
     const averageSellPriceTry = soldUsdt > 0 ? receivedTry / soldUsdt : 0
     const tryProfit = calculateRealizedTryProfit(filteredTransactions)
 
@@ -888,7 +961,10 @@ const TradebookPage = () => {
 
       if (transaction.type === 'BUY') {
         current.usdtIn += transaction.amountReceived
+      } else if (transaction.type === 'SELL') {
+        current.usdtOut += transaction.amountSold ?? 0
       } else {
+        current.usdtIn += transaction.amountReceived
         current.usdtOut += transaction.amountSold ?? 0
       }
 
@@ -1009,6 +1085,7 @@ const TradebookPage = () => {
                         <SelectContent>
                           <SelectItem value="BUY">BUY</SelectItem>
                           <SelectItem value="SELL">SELL</SelectItem>
+                          <SelectItem value="CYCLE_SETTLEMENT">Cycle Settlement</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1021,7 +1098,7 @@ const TradebookPage = () => {
                             : 'mb-2 text-sm font-semibold'
                         }
                       >
-                        Cycle
+                        {transactionType === 'CYCLE_SETTLEMENT' ? 'Source cycle' : 'Cycle'}
                       </p>
                       <div className="relative">
                         <Input
@@ -1237,9 +1314,9 @@ const TradebookPage = () => {
                           />
                         </div>
                       </>
-                    ) : (
+                    ) : transactionType === 'SELL' ? (
                       <>
-                        <div className="md:col-span-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3">
+                        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 md:col-span-2">
                           <div className="mb-3 flex items-center justify-between gap-2">
                             <p className="text-muted-foreground text-xs font-semibold uppercase">
                               Sell Details
@@ -1354,6 +1431,65 @@ const TradebookPage = () => {
                               />
                             </div>
                           </div>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Datetime</p>
+                          <Input
+                            type="datetime-local"
+                            value={occurredAt}
+                            onChange={(event) => setOccurredAt(event.target.value)}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Destination cycle</p>
+                          <Select value={settlementToCycle} onValueChange={setSettlementToCycle}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select destination cycle" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {cycleOptions
+                                .filter((cycleItem) => cycleItem.name !== getEffectiveCycle())
+                                .map((cycleItem) => (
+                                  <SelectItem key={cycleItem.id} value={cycleItem.name}>
+                                    {cycleItem.name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Settlement amount (USDT)</p>
+                          <NumberInput
+                            value={settlementAmount}
+                            onChange={setSettlementAmount}
+                            startAction={
+                              <span className="text-muted-foreground text-sm">
+                                {CURRENCY_SYMBOLS.USDT}
+                              </span>
+                            }
+                            endAction={
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground text-xs font-semibold"
+                                onClick={() => {
+                                  const maxValue = availableCycleUsdtBalance
+                                    .toFixed(4)
+                                    .replace(/\.?0+$/, '')
+                                  setSettlementAmount(maxValue)
+                                }}
+                              >
+                                MAX
+                              </button>
+                            }
+                          />
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            Source cycle balance: {formatUsdt(availableCycleUsdtBalance)} USDT
+                          </p>
                         </div>
 
                         <div>

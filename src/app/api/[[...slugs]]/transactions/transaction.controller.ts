@@ -1,6 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { transactionService } from './transaction.service'
 import { createCycleBodySchema } from './transaction.schemas'
+import { createTransactionResponseSchema } from './transaction.schemas'
 import { createTransactionBodySchema } from './transaction.schemas'
 import { cycleParamsSchema } from './transaction.schemas'
 import { deleteCycleResponseSchema } from './transaction.schemas'
@@ -8,7 +9,6 @@ import { cycleResponseSchema } from './transaction.schemas'
 import { listTransactionsResponseSchema } from './transaction.schemas'
 import { listCyclesResponseSchema } from './transaction.schemas'
 import { resetCycleResponseSchema } from './transaction.schemas'
-import { transactionResponseSchema } from './transaction.schemas'
 import { undoLastTransactionResponseSchema } from './transaction.schemas'
 import { updateCycleBodySchema } from './transaction.schemas'
 
@@ -137,13 +137,18 @@ export const transactionController = new Elysia({ prefix: '/transactions' })
           error: 'For SELL transactions, amountReceived or pricePerUnit must be provided',
         })
       }
+      if (body.type === 'CYCLE_SETTLEMENT' && body.fromCycle.trim() === body.toCycle.trim()) {
+        return status(400, {
+          error: 'Source and destination cycles must be different',
+        })
+      }
 
       return transactionService.createTransaction(body)
     },
     {
       body: createTransactionBodySchema,
       response: {
-        200: transactionResponseSchema,
+        200: createTransactionResponseSchema,
         400: errorResponseSchema,
       },
     }

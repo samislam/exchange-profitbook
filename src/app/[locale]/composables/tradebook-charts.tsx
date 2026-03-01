@@ -15,7 +15,7 @@ import {
   YAxis,
 } from 'recharts'
 
-type TransactionType = 'BUY' | 'SELL'
+type TransactionType = 'BUY' | 'SELL' | 'CYCLE_SETTLEMENT'
 type TransactionCurrency = 'USD' | 'TRY'
 
 type TradeTransaction = {
@@ -73,7 +73,7 @@ const calculateCumulativeTryProfitSeries = (transactions: TradeTransaction[]) =>
           })
         }
       }
-    } else {
+    } else if (transaction.type === 'SELL') {
       const soldUsdt = transaction.amountSold ?? 0
       const sellRateTry = transaction.pricePerUnit ?? transaction.effectiveRateTry ?? 0
       if (soldUsdt > 0 && sellRateTry > 0) {
@@ -115,8 +115,10 @@ export const TradebookCharts = ({ transactions }: TradebookChartsProps) => {
     return ordered.map((transaction) => {
       if (transaction.type === 'BUY') {
         balance += transaction.amountReceived
-      } else {
+      } else if (transaction.type === 'SELL') {
         balance -= transaction.amountSold ?? 0
+      } else {
+        balance += transaction.amountReceived - (transaction.amountSold ?? 0)
       }
       return {
         label: formatDateLabel(transaction.occurredAt),

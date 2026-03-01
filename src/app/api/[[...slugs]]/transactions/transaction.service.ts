@@ -22,7 +22,15 @@ type SellInput = {
   commissionPercent?: number
 }
 
-type CreateTransactionInput = BuyInput | SellInput
+type CycleSettlementInput = {
+  type: 'CYCLE_SETTLEMENT'
+  fromCycle: string
+  toCycle: string
+  occurredAt?: string
+  amount: number
+}
+
+type CreateTransactionInput = BuyInput | SellInput | CycleSettlementInput
 
 const decimalToNumber = (value: Prisma.Decimal | null | undefined) =>
   value === null || value === undefined ? null : Number(value)
@@ -30,7 +38,7 @@ const decimalToNumber = (value: Prisma.Decimal | null | undefined) =>
 const toPlainTransaction = (row: {
   id: string
   cycle: { name: string }
-  type: 'BUY' | 'SELL'
+  type: 'BUY' | 'SELL' | 'CYCLE_SETTLEMENT'
   occurredAt: Date
   createdAt: Date
   updatedAt: Date
@@ -189,6 +197,83 @@ export class TransactionService {
 
   async createTransaction(input: CreateTransactionInput) {
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date()
+    if (input.type === 'CYCLE_SETTLEMENT') {
+      const amount = input.amount
+      const fromCycleName = input.fromCycle.trim()
+      const toCycleName = input.toCycle.trim()
+
+      if (!fromCycleName || !toCycleName) {
+        throw new Error('Both source and destination cycles are required')
+      }
+      if (fromCycleName === toCycleName) {
+        throw new Error('Source and destination cycles must be different')
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Settlement amount must be greater than 0')
+      }
+
+      const [fromCycle, toCycle] = await Promise.all([
+        prismaClient.tradeCycle.upsert({
+          where: { name: fromCycleName },
+          create: { name: fromCycleName },
+          update: {},
+        }),
+        prismaClient.tradeCycle.upsert({
+          where: { name: toCycleName },
+          create: { name: toCycleName },
+          update: {},
+        }),
+      ])
+
+      const sourceRows = await prismaClient.tradeTransaction.findMany({
+        where: { cycleId: fromCycle.id },
+        select: {
+          type: true,
+          amountReceived: true,
+          amountSold: true,
+        },
+      })
+
+      const sourceBalance = sourceRows.reduce((sum, row) => {
+        if (row.type === 'BUY') return sum + Number(row.amountReceived)
+        if (row.type === 'SELL') return sum - Number(row.amountSold ?? 0)
+        return sum + Number(row.amountReceived) - Number(row.amountSold ?? 0)
+      }, 0)
+
+      if (amount > sourceBalance + Number.EPSILON) {
+        throw new Error(
+          `Settlement amount (${amount.toFixed(4)}) exceeds source cycle balance (${sourceBalance.toFixed(4)})`
+        )
+      }
+
+      const [fromRow, toRow] = await prismaClient.$transaction([
+        prismaClient.tradeTransaction.create({
+          data: {
+            cycleId: fromCycle.id,
+            type: 'CYCLE_SETTLEMENT',
+            occurredAt,
+            amountReceived: 0,
+            amountSold: amount,
+            receivedCurrency: 'TRY',
+          },
+          include: { cycle: true },
+        }),
+        prismaClient.tradeTransaction.create({
+          data: {
+            cycleId: toCycle.id,
+            type: 'CYCLE_SETTLEMENT',
+            occurredAt,
+            amountReceived: amount,
+            amountSold: null,
+            receivedCurrency: 'TRY',
+          },
+          include: { cycle: true },
+        }),
+      ])
+
+      return [toPlainTransaction(fromRow), toPlainTransaction(toRow)]
+    }
+
     const cycleName = input.cycle.trim()
     const cycle = await prismaClient.tradeCycle.upsert({
       where: { name: cycleName },

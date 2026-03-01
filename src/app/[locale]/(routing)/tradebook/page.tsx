@@ -117,12 +117,13 @@ const calculateRealizedTryProfit = (transactions: TradeTransaction[]) => {
     if (transaction.type === 'BUY') {
       if (transaction.transactionValue && transaction.amountReceived > 0) {
         const unitCostTry =
-          transaction.transactionCurrency === 'TRY'
+          transaction.effectiveRateTry ??
+          (transaction.transactionCurrency === 'TRY'
             ? transaction.transactionValue / transaction.amountReceived
             : transaction.transactionCurrency === 'USD' && transaction.usdTryRateAtBuy
               ? (transaction.transactionValue * transaction.usdTryRateAtBuy) /
                 transaction.amountReceived
-              : null
+              : null)
 
         if (!unitCostTry) continue
 
@@ -332,7 +333,7 @@ const TradebookPage = () => {
 
               const receivedUsdt = Number.parseFloat(buyAmountReceived)
               if (!Number.isFinite(receivedUsdt) || receivedUsdt <= 0) return Number.NaN
-              return (feeValue / receivedUsdt) * 100
+              return (feeValue / (receivedUsdt + feeValue)) * 100
             })(),
           }
         : {
@@ -382,9 +383,11 @@ const TradebookPage = () => {
       }
       if (
         payload.commissionPercent !== undefined &&
-        (!Number.isFinite(payload.commissionPercent) || payload.commissionPercent < 0)
+        (!Number.isFinite(payload.commissionPercent) ||
+          payload.commissionPercent < 0 ||
+          payload.commissionPercent >= 100)
       ) {
-        setErrorMessage('Fee must be 0 or greater')
+        setErrorMessage('Fee must be between 0 and less than 100')
         return
       }
     } else {

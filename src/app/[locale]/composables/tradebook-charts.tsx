@@ -58,12 +58,13 @@ const calculateCumulativeTryProfitSeries = (transactions: TradeTransaction[]) =>
     if (transaction.type === 'BUY') {
       if (transaction.transactionValue && transaction.amountReceived > 0) {
         const unitCostTry =
-          transaction.transactionCurrency === 'TRY'
+          transaction.effectiveRateTry ??
+          (transaction.transactionCurrency === 'TRY'
             ? transaction.transactionValue / transaction.amountReceived
             : transaction.transactionCurrency === 'USD' && transaction.usdTryRateAtBuy
               ? (transaction.transactionValue * transaction.usdTryRateAtBuy) /
                 transaction.amountReceived
-              : null
+              : null)
 
         if (unitCostTry) {
           tryBuyLots.push({

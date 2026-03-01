@@ -197,18 +197,23 @@ export class TransactionService {
     })
 
     if (input.type === 'BUY') {
-      const effectiveRateTry =
-        input.transactionCurrency === 'TRY'
-          ? input.transactionValue / input.amountReceived
-          : input.usdTryRateAtBuy
-            ? (input.transactionValue * input.usdTryRateAtBuy) / input.amountReceived
-            : null
-
       const commissionPercent =
         input.commissionPercent !== undefined
           ? input.commissionPercent
           : input.transactionCurrency === 'USD'
             ? ((input.transactionValue - input.amountReceived) / input.transactionValue) * 100
+            : null
+      const commissionRatio = commissionPercent !== null ? commissionPercent / 100 : 0
+      const grossBoughtUsdt =
+        commissionRatio > 0 && commissionRatio < 1
+          ? input.amountReceived / (1 - commissionRatio)
+          : input.amountReceived
+
+      const effectiveRateTry =
+        input.transactionCurrency === 'TRY'
+          ? input.transactionValue / grossBoughtUsdt
+          : input.usdTryRateAtBuy
+            ? (input.transactionValue * input.usdTryRateAtBuy) / grossBoughtUsdt
             : null
 
       const row = await prismaClient.tradeTransaction.create({

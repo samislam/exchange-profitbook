@@ -11,6 +11,7 @@ import { AppTabs } from '../../composables/app-tabs'
 import { Input } from '@/components/ui/shadcnui/input'
 import { Alert } from '@/components/ui/shadcnui/alert'
 import { Button } from '@/components/ui/shadcnui/button'
+import { ButtonWithTooltip } from '@/components/ui/shadcnui/button'
 import { Select } from '@/components/ui/shadcnui/select'
 import { Dialog } from '@/components/ui/shadcnui/dialog'
 import { AlertTitle } from '@/components/ui/shadcnui/alert'
@@ -1098,56 +1099,133 @@ const TradebookPage = () => {
 
                     {transactionType === 'BUY' ? (
                       <>
-                        <div>
-                          <p className="mb-2 text-sm font-semibold">Transaction value</p>
-                          <NumberInput
-                            value={transactionValue}
-                            onChange={setTransactionValue}
-                            startAction={
-                              <span className="text-muted-foreground text-sm">
-                                {CURRENCY_SYMBOLS[transactionCurrency]}
-                              </span>
-                            }
-                            endAction={
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-xs"
-                                onClick={() => {
-                                  if (buyInputMode === 'amount-received') {
-                                    setBuyInputMode('price-per-unit')
-                                    setBuyAmountReceived('')
-                                  } else {
-                                    setBuyInputMode('amount-received')
-                                    setBuyPricePerUnit('')
-                                  }
-                                }}
-                              >
-                                {buyInputMode === 'amount-received'
-                                  ? 'Price per unit'
-                                  : 'Amount received'}
-                              </Button>
-                            }
-                          />
-                        </div>
+                        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 md:col-span-2">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <p className="text-muted-foreground text-xs font-semibold uppercase">
+                              Buy Details
+                            </p>
+                            <ButtonWithTooltip
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 min-w-12 px-2 text-xs"
+                              tooltipText={
+                                buyInputMode === 'amount-received'
+                                  ? 'Amt = Amount received mode'
+                                  : 'PPU = Price per unit mode'
+                              }
+                              onClick={() => {
+                                if (buyInputMode === 'amount-received') {
+                                  setBuyInputMode('price-per-unit')
+                                  setBuyAmountReceived('')
+                                } else {
+                                  setBuyInputMode('amount-received')
+                                  setBuyPricePerUnit('')
+                                }
+                              }}
+                            >
+                              {buyInputMode === 'amount-received' ? 'Mode: Amt' : 'Mode: PPU'}
+                            </ButtonWithTooltip>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                              <p className="mb-2 text-sm font-semibold">Transaction value</p>
+                              <NumberInput
+                                value={transactionValue}
+                                onChange={setTransactionValue}
+                                startAction={
+                                  <span className="text-muted-foreground text-sm">
+                                    {CURRENCY_SYMBOLS[transactionCurrency]}
+                                  </span>
+                                }
+                                endAction={
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 min-w-9 px-2 text-xs"
+                                    onClick={() =>
+                                      setTransactionCurrency((prev) =>
+                                        prev === 'USD' ? 'TRY' : 'USD'
+                                      )
+                                    }
+                                  >
+                                    {CURRENCY_SYMBOLS[transactionCurrency]}
+                                  </Button>
+                                }
+                              />
+                            </div>
 
-                        <div>
-                          <p className="mb-2 text-sm font-semibold">Transaction currency</p>
-                          <Select
-                            value={transactionCurrency}
-                            onValueChange={(value) =>
-                              setTransactionCurrency(value as TransactionCurrency)
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="USD">USD</SelectItem>
-                              <SelectItem value="TRY">TRY</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            <div>
+                              <p className="mb-2 text-sm font-semibold">
+                                {buyInputMode === 'amount-received'
+                                  ? 'Amount received (USDT)'
+                                  : 'Price per unit (TRY)'}
+                              </p>
+                              {buyInputMode === 'amount-received' ? (
+                                <NumberInput
+                                  value={buyAmountReceived}
+                                  onChange={setBuyAmountReceived}
+                                  startAction={
+                                    <span className="text-muted-foreground text-sm">
+                                      {CURRENCY_SYMBOLS.USDT}
+                                    </span>
+                                  }
+                                />
+                              ) : (
+                                <NumberInput
+                                  value={buyPricePerUnit}
+                                  onChange={setBuyPricePerUnit}
+                                  startAction={
+                                    <span className="text-muted-foreground text-sm">
+                                      {CURRENCY_SYMBOLS.TRY}
+                                    </span>
+                                  }
+                                />
+                              )}
+                            </div>
+
+                            {transactionCurrency === 'USD' && (
+                              <div>
+                                <p className="mb-2 text-sm font-semibold">USD/TRY rate at buy</p>
+                                <NumberInput
+                                  value={buyUsdTryRateAtBuy}
+                                  onChange={setBuyUsdTryRateAtBuy}
+                                  startAction={
+                                    <span className="text-muted-foreground text-sm">
+                                      {CURRENCY_SYMBOLS.TRY}
+                                    </span>
+                                  }
+                                />
+                              </div>
+                            )}
+
+                            <div>
+                              <p className="mb-2 text-sm font-semibold">
+                                Fee ({buyFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT})
+                              </p>
+                              <NumberInput
+                                value={buyFee}
+                                onChange={setBuyFee}
+                                placeholder="0.00"
+                                endAction={
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 min-w-9 px-2 text-xs"
+                                    onClick={() =>
+                                      setBuyFeeUnit((prev) =>
+                                        prev === 'percent' ? 'usdt' : 'percent'
+                                      )
+                                    }
+                                  >
+                                    {buyFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT}
+                                  </Button>
+                                }
+                              />
+                            </div>
+                          </div>
                         </div>
 
                         <div>
@@ -1158,86 +1236,9 @@ const TradebookPage = () => {
                             onChange={(event) => setOccurredAt(event.target.value)}
                           />
                         </div>
-
-                        <div>
-                          <p className="mb-2 text-sm font-semibold">
-                            {buyInputMode === 'amount-received'
-                              ? 'Amount received (USDT)'
-                              : 'Price per unit (TRY)'}
-                          </p>
-                          {buyInputMode === 'amount-received' ? (
-                            <NumberInput
-                              value={buyAmountReceived}
-                              onChange={setBuyAmountReceived}
-                              startAction={
-                                <span className="text-muted-foreground text-sm">
-                                  {CURRENCY_SYMBOLS.USDT}
-                                </span>
-                              }
-                            />
-                          ) : (
-                            <NumberInput
-                              value={buyPricePerUnit}
-                              onChange={setBuyPricePerUnit}
-                              startAction={
-                                <span className="text-muted-foreground text-sm">
-                                  {CURRENCY_SYMBOLS.TRY}
-                                </span>
-                              }
-                            />
-                          )}
-                        </div>
-
-                        <div>
-                          <p className="mb-2 text-sm font-semibold">
-                            Fee ({buyFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT})
-                          </p>
-                          <NumberInput
-                            value={buyFee}
-                            onChange={setBuyFee}
-                            placeholder="0.00"
-                            endAction={
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 min-w-9 px-2 text-xs"
-                                onClick={() =>
-                                  setBuyFeeUnit((prev) => (prev === 'percent' ? 'usdt' : 'percent'))
-                                }
-                              >
-                                {buyFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT}
-                              </Button>
-                            }
-                          />
-                        </div>
-
-                        {transactionCurrency === 'USD' && (
-                          <div>
-                            <p className="mb-2 text-sm font-semibold">USD/TRY rate at buy</p>
-                            <NumberInput
-                              value={buyUsdTryRateAtBuy}
-                              onChange={setBuyUsdTryRateAtBuy}
-                              startAction={
-                                <span className="text-muted-foreground text-sm">
-                                  {CURRENCY_SYMBOLS.TRY}
-                                </span>
-                              }
-                            />
-                          </div>
-                        )}
                       </>
                     ) : (
                       <>
-                        <div>
-                          <p className="mb-2 text-sm font-semibold">Datetime</p>
-                          <Input
-                            type="datetime-local"
-                            value={occurredAt}
-                            onChange={(event) => setOccurredAt(event.target.value)}
-                          />
-                        </div>
-
                         <div>
                           <p className="mb-2 text-sm font-semibold">Amount sold (USDT)</p>
                           <NumberInput
@@ -1348,6 +1349,15 @@ const TradebookPage = () => {
                                 {sellFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT}
                               </Button>
                             }
+                          />
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">Datetime</p>
+                          <Input
+                            type="datetime-local"
+                            value={occurredAt}
+                            onChange={(event) => setOccurredAt(event.target.value)}
                           />
                         </div>
                       </>

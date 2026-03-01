@@ -78,6 +78,18 @@ const nowDateTimeLocal = () => {
   return local.toISOString().slice(0, 16)
 }
 
+const toDateTimeLocal = (value: string) => {
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 16)
+}
+
+const toInputNumber = (value: number | null | undefined) => {
+  if (value === null || value === undefined) return ''
+  if (!Number.isFinite(value)) return ''
+  return String(value)
+}
+
 const truncateToTwoDecimals = (value: number) => Math.trunc(value * 100) / 100
 
 const formatAmount = (value: number) =>
@@ -185,7 +197,10 @@ const TradebookPage = () => {
   const [isCycleDeleting, setIsCycleDeleting] = useState(false)
   const [isCycleResetting, setIsCycleResetting] = useState(false)
   const [isTransactionDeleting, setIsTransactionDeleting] = useState(false)
+  const [isTransactionUpdating, setIsTransactionUpdating] = useState(false)
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null)
   const [isDeleteTransactionConfirmOpen, setIsDeleteTransactionConfirmOpen] = useState(false)
+  const [isEditTransactionConfirmOpen, setIsEditTransactionConfirmOpen] = useState(false)
   const [pendingCycleAction, setPendingCycleAction] = useState<PendingCycleAction>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cycleErrorMessage, setCycleErrorMessage] = useState<string | null>(null)
@@ -291,6 +306,7 @@ const TradebookPage = () => {
   }, [])
 
   const resetForm = () => {
+    setEditingTransactionId(null)
     setTransactionType('BUY')
     const defaultCycle = selectedCycle ?? cycleOptions[0]?.name ?? ''
     setTransactionCycle(defaultCycle)
@@ -315,9 +331,13 @@ const TradebookPage = () => {
     setCorrectionAmount('')
   }
 
-  const createTransaction = async () => {
+  const createTransaction = async (forceUnsafeEdit = false) => {
     setErrorMessage(null)
     const effectiveCycle = getEffectiveCycle()
+    const editingTransaction =
+      editingTransactionId === null
+        ? null
+        : (transactions.find((transaction) => transaction.id === editingTransactionId) ?? null)
 
     const occurredAtIso = new Date(occurredAt).toISOString()
     if (!occurredAt || Number.isNaN(new Date(occurredAt).getTime())) {
@@ -565,10 +585,55 @@ const TradebookPage = () => {
       }
     }
 
-    setIsSaving(true)
+    if (
+      editingTransaction &&
+      !forceUnsafeEdit &&
+      transactionType !== 'CYCLE_SETTLEMENT' &&
+      (() => {
+        const cycleTransactions = transactions
+          .filter((transaction) => transaction.cycle === editingTransaction.cycle)
+          .sort(
+            (a, b) =>
+              new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() ||
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+        return cycleTransactions[0]?.id !== editingTransaction.id
+      })()
+    ) {
+      setIsEditTransactionConfirmOpen(true)
+      return
+    }
+
+    if (editingTransaction) {
+      if (payload.type === 'CYCLE_SETTLEMENT') {
+        setErrorMessage('Cycle settlement transactions are not editable')
+        return
+      }
+      setIsTransactionUpdating(true)
+    } else {
+      setIsSaving(true)
+    }
 
     try {
-      const { data, error } = await appApi.transactions.post(payload)
+      let data: unknown
+      let error: {
+        value?: unknown
+      } | null = null
+      if (editingTransaction) {
+        if (payload.type === 'CYCLE_SETTLEMENT') {
+          throw new Error('Cycle settlement transactions are not editable')
+        }
+        const updatePayload: Exclude<typeof payload, { type: 'CYCLE_SETTLEMENT' }> = payload
+        const response = await appApi
+          .transactions({ id: editingTransaction.id })
+          .patch(updatePayload)
+        data = response.data
+        error = response.error
+      } else {
+        const response = await appApi.transactions.post(payload)
+        data = response.data
+        error = response.error
+      }
       if (error) {
         const message =
           typeof error.value === 'object' &&
@@ -580,20 +645,32 @@ const TradebookPage = () => {
         throw new Error(message)
       }
 
-      const createdTransactions = Array.isArray(data)
-        ? (data as TradeTransaction[])
-        : [data as TradeTransaction]
-      setTransactions((prev) => [...prev, ...createdTransactions])
+      if (editingTransaction) {
+        const updated = data as TradeTransaction
+        setTransactions((prev) =>
+          prev.map((transaction) => (transaction.id === updated.id ? updated : transaction))
+        )
+      } else {
+        const createdTransactions = Array.isArray(data)
+          ? (data as TradeTransaction[])
+          : [data as TradeTransaction]
+        setTransactions((prev) => [...prev, ...createdTransactions])
+      }
       void loadCycles()
       resetForm()
       setIsFormOpen(false)
-      appToast.success('Transaction created')
+      setIsEditTransactionConfirmOpen(false)
+      appToast.success(editingTransaction ? 'Transaction updated' : 'Transaction created')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create transaction'
+      const message = error instanceof Error ? error.message : 'Failed to save transaction'
       setErrorMessage(message)
       appToast.fail(message)
     } finally {
-      setIsSaving(false)
+      if (editingTransaction) {
+        setIsTransactionUpdating(false)
+      } else {
+        setIsSaving(false)
+      }
     }
   }
 
@@ -918,6 +995,86 @@ const TradebookPage = () => {
     setIsDeleteTransactionConfirmOpen(true)
   }
 
+  const openEditTransactionForm = (transaction: TradeTransaction) => {
+    setEditingTransactionId(transaction.id)
+    setErrorMessage(null)
+    setIsEditTransactionConfirmOpen(false)
+
+    setTransactionType(transaction.type)
+    setTransactionCycle(transaction.cycle)
+    setCycleSearchTerm(transaction.cycle)
+    setOccurredAt(toDateTimeLocal(transaction.occurredAt))
+
+    if (transaction.type === 'BUY') {
+      setTransactionCurrency(transaction.transactionCurrency ?? 'USD')
+      setTransactionValue(toInputNumber(transaction.transactionValue))
+      setBuyInputMode('amount-received')
+      setBuyAmountReceived(toInputNumber(transaction.amountReceived))
+      setBuyPricePerUnit('')
+      setBuyUsdTryRateAtBuy(toInputNumber(transaction.usdTryRateAtBuy))
+      setBuyFee(
+        transaction.commissionPercent !== null ? toInputNumber(transaction.commissionPercent) : ''
+      )
+      setBuyFeeUnit(transaction.commissionPercent !== null ? 'percent' : 'usdt')
+      setSellAmountSold('')
+      setSellAmountReceived('')
+      setSellPricePerUnit('')
+      setSellFee('')
+      setSettlementAmount('')
+      setSettlementToCycle('')
+      setCorrectionAmount('')
+    } else if (transaction.type === 'SELL') {
+      setSellAmountSold(toInputNumber(transaction.amountSold))
+      if (transaction.pricePerUnit !== null) {
+        setSellInputMode('price-per-unit')
+        setSellPricePerUnit(toInputNumber(transaction.pricePerUnit))
+        setSellAmountReceived('')
+      } else {
+        setSellInputMode('amount-received')
+        setSellAmountReceived(toInputNumber(transaction.amountReceived))
+        setSellPricePerUnit('')
+      }
+      setSellFee(
+        transaction.commissionPercent !== null ? toInputNumber(transaction.commissionPercent) : ''
+      )
+      setSellFeeUnit(transaction.commissionPercent !== null ? 'percent' : 'usdt')
+      setTransactionValue('')
+      setBuyAmountReceived('')
+      setBuyPricePerUnit('')
+      setBuyUsdTryRateAtBuy('')
+      setBuyFee('')
+      setSettlementAmount('')
+      setSettlementToCycle('')
+      setCorrectionAmount('')
+    } else if (
+      transaction.type === 'DEPOSIT_BALANCE_CORRECTION' ||
+      transaction.type === 'WITHDRAW_BALANCE_CORRECTION'
+    ) {
+      setCorrectionAmount(
+        transaction.type === 'DEPOSIT_BALANCE_CORRECTION'
+          ? toInputNumber(transaction.amountReceived)
+          : toInputNumber(transaction.amountSold)
+      )
+      setTransactionValue('')
+      setBuyAmountReceived('')
+      setBuyPricePerUnit('')
+      setBuyUsdTryRateAtBuy('')
+      setBuyFee('')
+      setSellAmountSold('')
+      setSellAmountReceived('')
+      setSellPricePerUnit('')
+      setSellFee('')
+      setSettlementAmount('')
+      setSettlementToCycle('')
+    } else {
+      appToast.info('Cycle settlement transactions cannot be edited yet')
+      return
+    }
+
+    setSelectedTransactionId(null)
+    setIsFormOpen(true)
+  }
+
   const ledgerRows = useMemo(() => {
     const ordered = [...filteredTransactions].sort(
       (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
@@ -1174,9 +1331,26 @@ const TradebookPage = () => {
                 {isCycleUndoing ? 'Undoing...' : 'Undo last transaction'}
               </Button>
             )}
-            <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
+            <Dialog
+              open={isFormOpen}
+              onOpenChange={(open) => {
+                setIsFormOpen(open)
+                if (!open) {
+                  setErrorMessage(null)
+                  setIsEditTransactionConfirmOpen(false)
+                  resetForm()
+                }
+              }}
+            >
               <DialogTrigger asChild>
-                <Button variant="default">
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setErrorMessage(null)
+                    setIsEditTransactionConfirmOpen(false)
+                    resetForm()
+                  }}
+                >
                   <Plus className="h-4 w-4" />
                   Create new transaction
                 </Button>
@@ -1184,8 +1358,14 @@ const TradebookPage = () => {
 
               <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Create transaction</DialogTitle>
-                  <DialogDescription>Add a BUY or SELL trade entry.</DialogDescription>
+                  <DialogTitle>
+                    {editingTransactionId ? 'Edit transaction' : 'Create transaction'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {editingTransactionId
+                      ? 'Update the selected transaction.'
+                      : 'Add a BUY or SELL trade entry.'}
+                  </DialogDescription>
                 </DialogHeader>
                 {isSellBalanceWarningVisible && (
                   <Alert className="mt-2 border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200">
@@ -1694,12 +1874,18 @@ const TradebookPage = () => {
                         setIsFormOpen(false)
                         setErrorMessage(null)
                       }}
-                      disabled={isSaving}
+                      disabled={isSaving || isTransactionUpdating}
                     >
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={isSaving}>
-                      {isSaving ? 'Creating...' : 'Create'}
+                    <Button type="submit" disabled={isSaving || isTransactionUpdating}>
+                      {isSaving
+                        ? 'Creating...'
+                        : isTransactionUpdating
+                          ? 'Saving...'
+                          : editingTransactionId
+                            ? 'Save changes'
+                            : 'Create'}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -1989,6 +2175,7 @@ const TradebookPage = () => {
           if (!open) {
             setSelectedTransactionId(null)
             setIsDeleteTransactionConfirmOpen(false)
+            setIsEditTransactionConfirmOpen(false)
           }
         }}
       >
@@ -2078,11 +2265,50 @@ const TradebookPage = () => {
             </Button>
             <Button
               type="button"
+              variant="outline"
+              onClick={() =>
+                selectedTransaction ? openEditTransactionForm(selectedTransaction) : undefined
+              }
+              disabled={!selectedTransaction || selectedTransaction.type === 'CYCLE_SETTLEMENT'}
+            >
+              Edit transaction
+            </Button>
+            <Button
+              type="button"
               variant="destructive"
               onClick={() => void requestDeleteSelectedTransaction()}
               disabled={isTransactionDeleting}
             >
               {isTransactionDeleting ? 'Deleting...' : 'Delete transaction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditTransactionConfirmOpen} onOpenChange={setIsEditTransactionConfirmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Save edit?</DialogTitle>
+            <DialogDescription>
+              This is not the latest transaction in its cycle. Editing it may change downstream
+              balances and profit calculations.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsEditTransactionConfirmOpen(false)}
+              disabled={isTransactionUpdating}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void createTransaction(true)}
+              disabled={isTransactionUpdating}
+            >
+              {isTransactionUpdating ? 'Saving...' : 'Save anyway'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2098,8 +2324,7 @@ const TradebookPage = () => {
             <DialogDescription>
               This is not the latest transaction in cycle &quot;
               {selectedTransaction?.cycle ?? ''}
-              &quot;.
-              Deleting it may change downstream balances and profit calculations.
+              &quot;. Deleting it may change downstream balances and profit calculations.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

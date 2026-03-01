@@ -50,9 +50,19 @@ type CreateTransactionInput =
   | CycleSettlementInput
   | DepositBalanceCorrectionInput
   | WithdrawBalanceCorrectionInput
+type UpdateTransactionInput = Exclude<CreateTransactionInput, CycleSettlementInput>
 
 const decimalToNumber = (value: Prisma.Decimal | null | undefined) =>
   value === null || value === undefined ? null : Number(value)
+
+const applyUsdtDelta = (
+  sum: number,
+  row: { type: string; amountReceived: Prisma.Decimal; amountSold: Prisma.Decimal | null }
+) => {
+  if (row.type === 'BUY') return sum + Number(row.amountReceived)
+  if (row.type === 'SELL') return sum - Number(row.amountSold ?? 0)
+  return sum + Number(row.amountReceived) - Number(row.amountSold ?? 0)
+}
 
 const toPlainTransaction = (row: {
   id: string
@@ -94,6 +104,22 @@ const toPlainTransaction = (row: {
 })
 
 export class TransactionService {
+  private async getCycleUsdtBalance(cycleId: string, excludeTransactionId?: string) {
+    const cycleRows = await prismaClient.tradeTransaction.findMany({
+      where: {
+        cycleId,
+        ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}),
+      },
+      select: {
+        type: true,
+        amountReceived: true,
+        amountSold: true,
+      },
+    })
+
+    return cycleRows.reduce(applyUsdtDelta, 0)
+  }
+
   async listCycles() {
     const cycles = await prismaClient.tradeCycle.findMany({
       orderBy: { createdAt: 'asc' },
@@ -231,6 +257,146 @@ export class TransactionService {
     }
   }
 
+  async updateTransaction(id: string, input: UpdateTransactionInput) {
+    const existing = await prismaClient.tradeTransaction.findUnique({
+      where: { id },
+      include: { cycle: true },
+    })
+    if (!existing) {
+      throw new Error('Transaction not found')
+    }
+
+    if (existing.type === 'CYCLE_SETTLEMENT') {
+      throw new Error('Cycle settlement transactions are not editable')
+    }
+
+    const occurredAt = input.occurredAt ? new Date(input.occurredAt) : existing.occurredAt
+
+    if (
+      input.type === 'DEPOSIT_BALANCE_CORRECTION' ||
+      input.type === 'WITHDRAW_BALANCE_CORRECTION'
+    ) {
+      const amount = input.amount
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Correction amount must be greater than 0')
+      }
+
+      const cycleName = input.cycle.trim()
+      const cycle = await prismaClient.tradeCycle.upsert({
+        where: { name: cycleName },
+        create: { name: cycleName },
+        update: {},
+      })
+
+      if (input.type === 'WITHDRAW_BALANCE_CORRECTION') {
+        const cycleBalance = await this.getCycleUsdtBalance(cycle.id, id)
+        if (amount > cycleBalance + Number.EPSILON) {
+          throw new Error(
+            `Withdraw correction amount (${amount.toFixed(4)}) exceeds cycle balance (${cycleBalance.toFixed(4)})`
+          )
+        }
+      }
+
+      const row = await prismaClient.tradeTransaction.update({
+        where: { id },
+        data: {
+          cycleId: cycle.id,
+          type: input.type,
+          occurredAt,
+          transactionValue: null,
+          transactionCurrency: null,
+          usdTryRateAtBuy: null,
+          amountReceived: input.type === 'DEPOSIT_BALANCE_CORRECTION' ? amount : 0,
+          amountSold: input.type === 'WITHDRAW_BALANCE_CORRECTION' ? amount : null,
+          pricePerUnit: null,
+          receivedCurrency: 'TRY',
+          commissionPercent: null,
+          effectiveRateTry: null,
+        },
+        include: { cycle: true },
+      })
+
+      return toPlainTransaction(row)
+    }
+
+    const cycleName = input.cycle.trim()
+    const cycle = await prismaClient.tradeCycle.upsert({
+      where: { name: cycleName },
+      create: { name: cycleName },
+      update: {},
+    })
+
+    if (input.type === 'BUY') {
+      const commissionPercent =
+        input.commissionPercent !== undefined
+          ? input.commissionPercent
+          : input.transactionCurrency === 'USD'
+            ? ((input.transactionValue - input.amountReceived) / input.transactionValue) * 100
+            : null
+      const commissionRatio = commissionPercent !== null ? commissionPercent / 100 : 0
+      const grossBoughtUsdt =
+        commissionRatio > 0 && commissionRatio < 1
+          ? input.amountReceived / (1 - commissionRatio)
+          : input.amountReceived
+
+      const effectiveRateTry =
+        input.transactionCurrency === 'TRY'
+          ? input.transactionValue / grossBoughtUsdt
+          : input.usdTryRateAtBuy
+            ? (input.transactionValue * input.usdTryRateAtBuy) / grossBoughtUsdt
+            : null
+
+      const row = await prismaClient.tradeTransaction.update({
+        where: { id },
+        data: {
+          cycleId: cycle.id,
+          type: 'BUY',
+          occurredAt,
+          transactionValue: input.transactionValue,
+          transactionCurrency: input.transactionCurrency,
+          usdTryRateAtBuy: input.usdTryRateAtBuy,
+          amountReceived: input.amountReceived,
+          amountSold: null,
+          pricePerUnit: null,
+          receivedCurrency: 'TRY',
+          commissionPercent,
+          effectiveRateTry,
+        },
+        include: { cycle: true },
+      })
+
+      return toPlainTransaction(row)
+    }
+
+    const commissionRatio = (input.commissionPercent ?? 0) / 100
+    const netSoldUsdt = input.amountSold * (1 - commissionRatio)
+
+    const amountReceived =
+      input.amountReceived ?? (input.pricePerUnit as number | undefined)! * netSoldUsdt
+    const pricePerUnit = input.pricePerUnit ?? amountReceived / netSoldUsdt
+
+    const row = await prismaClient.tradeTransaction.update({
+      where: { id },
+      data: {
+        cycleId: cycle.id,
+        type: 'SELL',
+        occurredAt,
+        transactionValue: null,
+        transactionCurrency: null,
+        usdTryRateAtBuy: null,
+        amountReceived,
+        amountSold: input.amountSold,
+        pricePerUnit,
+        receivedCurrency: 'TRY',
+        commissionPercent: input.commissionPercent,
+        effectiveRateTry: pricePerUnit,
+      },
+      include: { cycle: true },
+    })
+
+    return toPlainTransaction(row)
+  }
+
   async createTransaction(input: CreateTransactionInput) {
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date()
     if (input.type === 'CYCLE_SETTLEMENT') {
@@ -270,11 +436,7 @@ export class TransactionService {
         },
       })
 
-      const sourceBalance = sourceRows.reduce((sum, row) => {
-        if (row.type === 'BUY') return sum + Number(row.amountReceived)
-        if (row.type === 'SELL') return sum - Number(row.amountSold ?? 0)
-        return sum + Number(row.amountReceived) - Number(row.amountSold ?? 0)
-      }, 0)
+      const sourceBalance = sourceRows.reduce(applyUsdtDelta, 0)
 
       if (amount > sourceBalance + Number.EPSILON) {
         throw new Error(
@@ -336,11 +498,7 @@ export class TransactionService {
           },
         })
 
-        const cycleBalance = cycleRows.reduce((sum, row) => {
-          if (row.type === 'BUY') return sum + Number(row.amountReceived)
-          if (row.type === 'SELL') return sum - Number(row.amountSold ?? 0)
-          return sum + Number(row.amountReceived) - Number(row.amountSold ?? 0)
-        }, 0)
+        const cycleBalance = cycleRows.reduce(applyUsdtDelta, 0)
 
         if (amount > cycleBalance + Number.EPSILON) {
           throw new Error(

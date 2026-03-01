@@ -61,6 +61,13 @@ export const createTransactionBodySchema = t.Union([
   createWithdrawBalanceCorrectionBodySchema,
 ])
 
+export const updateTransactionBodySchema = t.Union([
+  createBuyTransactionBodySchema,
+  createSellTransactionBodySchema,
+  createDepositBalanceCorrectionBodySchema,
+  createWithdrawBalanceCorrectionBodySchema,
+])
+
 export const transactionResponseSchema = t.Object({
   id: t.String(),
   cycle: t.String(),
@@ -129,3 +136,5 @@ export const createTransactionResponseSchema = t.Union([
   transactionResponseSchema,
   t.Array(transactionResponseSchema),
 ])
+
+export const updateTransactionResponseSchema = transactionResponseSchema

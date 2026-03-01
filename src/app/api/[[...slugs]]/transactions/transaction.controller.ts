@@ -13,6 +13,8 @@ import { resetCycleResponseSchema } from './transaction.schemas'
 import { transactionParamsSchema } from './transaction.schemas'
 import { undoLastTransactionResponseSchema } from './transaction.schemas'
 import { updateCycleBodySchema } from './transaction.schemas'
+import { updateTransactionBodySchema } from './transaction.schemas'
+import { updateTransactionResponseSchema } from './transaction.schemas'
 
 const errorResponseSchema = t.Object({
   error: t.String(),
@@ -75,6 +77,35 @@ export const transactionController = new Elysia({ prefix: '/transactions' })
       params: cycleParamsSchema,
       response: {
         200: deleteCycleResponseSchema,
+        400: errorResponseSchema,
+      },
+    }
+  )
+  .patch(
+    '/:id',
+    async ({ params, body, status }) => {
+      try {
+        if (body.type === 'BUY' && body.transactionCurrency === 'USD' && !body.usdTryRateAtBuy) {
+          return status(400, {
+            error: 'For USD BUY transactions, usdTryRateAtBuy is required',
+          })
+        }
+        if (body.type === 'SELL' && !body.amountReceived && !body.pricePerUnit) {
+          return status(400, {
+            error: 'For SELL transactions, amountReceived or pricePerUnit must be provided',
+          })
+        }
+        return await transactionService.updateTransaction(params.id, body)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to update transaction'
+        return status(400, { error: message })
+      }
+    },
+    {
+      params: transactionParamsSchema,
+      body: updateTransactionBodySchema,
+      response: {
+        200: updateTransactionResponseSchema,
         400: errorResponseSchema,
       },
     }

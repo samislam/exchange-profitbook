@@ -5,10 +5,12 @@ import { createTransactionResponseSchema } from './transaction.schemas'
 import { createTransactionBodySchema } from './transaction.schemas'
 import { cycleParamsSchema } from './transaction.schemas'
 import { deleteCycleResponseSchema } from './transaction.schemas'
+import { deleteTransactionResponseSchema } from './transaction.schemas'
 import { cycleResponseSchema } from './transaction.schemas'
 import { listTransactionsResponseSchema } from './transaction.schemas'
 import { listCyclesResponseSchema } from './transaction.schemas'
 import { resetCycleResponseSchema } from './transaction.schemas'
+import { transactionParamsSchema } from './transaction.schemas'
 import { undoLastTransactionResponseSchema } from './transaction.schemas'
 import { updateCycleBodySchema } from './transaction.schemas'
 
@@ -121,6 +123,24 @@ export const transactionController = new Elysia({ prefix: '/transactions' })
     {
       response: {
         200: listTransactionsResponseSchema,
+      },
+    }
+  )
+  .delete(
+    '/:id',
+    async ({ params, status }) => {
+      try {
+        return await transactionService.deleteTransaction(params.id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete transaction'
+        return status(400, { error: message })
+      }
+    },
+    {
+      params: transactionParamsSchema,
+      response: {
+        200: deleteTransactionResponseSchema,
+        400: errorResponseSchema,
       },
     }
   )

@@ -184,6 +184,8 @@ const TradebookPage = () => {
   const [isCycleUndoing, setIsCycleUndoing] = useState(false)
   const [isCycleDeleting, setIsCycleDeleting] = useState(false)
   const [isCycleResetting, setIsCycleResetting] = useState(false)
+  const [isTransactionDeleting, setIsTransactionDeleting] = useState(false)
+  const [isDeleteTransactionConfirmOpen, setIsDeleteTransactionConfirmOpen] = useState(false)
   const [pendingCycleAction, setPendingCycleAction] = useState<PendingCycleAction>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cycleErrorMessage, setCycleErrorMessage] = useState<string | null>(null)
@@ -867,6 +869,54 @@ const TradebookPage = () => {
     () => transactions.find((transaction) => transaction.id === selectedTransactionId) ?? null,
     [transactions, selectedTransactionId]
   )
+
+  const isSelectedTransactionLastInCycle = useMemo(() => {
+    if (!selectedTransaction) return false
+    const cycleTransactions = transactions
+      .filter((transaction) => transaction.cycle === selectedTransaction.cycle)
+      .sort(
+        (a, b) =>
+          new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() ||
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+    return cycleTransactions[0]?.id === selectedTransaction.id
+  }, [selectedTransaction, transactions])
+
+  const executeDeleteTransaction = async (transactionId: string) => {
+    setIsTransactionDeleting(true)
+    try {
+      const { error } = await appApi.transactions({ id: transactionId }).delete()
+      if (error) {
+        const message =
+          typeof error.value === 'object' &&
+          error.value &&
+          'error' in error.value &&
+          typeof error.value.error === 'string'
+            ? error.value.error
+            : 'Failed to delete transaction'
+        throw new Error(message)
+      }
+
+      setTransactions((prev) => prev.filter((transaction) => transaction.id !== transactionId))
+      setSelectedTransactionId(null)
+      setIsDeleteTransactionConfirmOpen(false)
+      appToast.success('Transaction deleted')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete transaction'
+      appToast.fail(message)
+    } finally {
+      setIsTransactionDeleting(false)
+    }
+  }
+
+  const requestDeleteSelectedTransaction = async () => {
+    if (!selectedTransaction) return
+    if (isSelectedTransactionLastInCycle) {
+      await executeDeleteTransaction(selectedTransaction.id)
+      return
+    }
+    setIsDeleteTransactionConfirmOpen(true)
+  }
 
   const ledgerRows = useMemo(() => {
     const ordered = [...filteredTransactions].sort(
@@ -1936,7 +1986,10 @@ const TradebookPage = () => {
       <Dialog
         open={selectedTransaction !== null}
         onOpenChange={(open) => {
-          if (!open) setSelectedTransactionId(null)
+          if (!open) {
+            setSelectedTransactionId(null)
+            setIsDeleteTransactionConfirmOpen(false)
+          }
         }}
       >
         <DialogContent className="sm:max-w-lg">
@@ -2022,6 +2075,53 @@ const TradebookPage = () => {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setSelectedTransactionId(null)}>
               Close
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void requestDeleteSelectedTransaction()}
+              disabled={isTransactionDeleting}
+            >
+              {isTransactionDeleting ? 'Deleting...' : 'Delete transaction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isDeleteTransactionConfirmOpen}
+        onOpenChange={setIsDeleteTransactionConfirmOpen}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete transaction?</DialogTitle>
+            <DialogDescription>
+              This is not the latest transaction in cycle &quot;
+              {selectedTransaction?.cycle ?? ''}
+              &quot;.
+              Deleting it may change downstream balances and profit calculations.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsDeleteTransactionConfirmOpen(false)}
+              disabled={isTransactionDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() =>
+                selectedTransaction
+                  ? void executeDeleteTransaction(selectedTransaction.id)
+                  : undefined
+              }
+              disabled={isTransactionDeleting || !selectedTransaction}
+            >
+              {isTransactionDeleting ? 'Deleting...' : 'Delete anyway'}
             </Button>
           </DialogFooter>
         </DialogContent>

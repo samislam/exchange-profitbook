@@ -219,6 +219,18 @@ export class TransactionService {
     return rows.map(toPlainTransaction)
   }
 
+  async deleteTransaction(id: string) {
+    const deleted = await prismaClient.tradeTransaction.delete({
+      where: { id },
+      select: { id: true },
+    })
+
+    return {
+      success: true,
+      deletedTransactionId: deleted.id,
+    }
+  }
+
   async createTransaction(input: CreateTransactionInput) {
     const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date()
     if (input.type === 'CYCLE_SETTLEMENT') {

@@ -89,6 +89,10 @@ export const cycleParamsSchema = t.Object({
   id: t.String(),
 })
 
+export const transactionParamsSchema = t.Object({
+  id: t.String(),
+})
+
 export const updateCycleBodySchema = t.Object({
   name: cycleNameSchema,
 })
@@ -112,6 +116,11 @@ export const resetCycleResponseSchema = t.Object({
 })
 
 export const undoLastTransactionResponseSchema = t.Object({
+  success: t.Boolean(),
+  deletedTransactionId: t.String(),
+})
+
+export const deleteTransactionResponseSchema = t.Object({
   success: t.Boolean(),
   deletedTransactionId: t.String(),
 })

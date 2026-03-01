@@ -15,12 +15,68 @@ import { undoLastTransactionResponseSchema } from './transaction.schemas'
 import { updateCycleBodySchema } from './transaction.schemas'
 import { updateTransactionBodySchema } from './transaction.schemas'
 import { updateTransactionResponseSchema } from './transaction.schemas'
+import { createInstitutionBodySchema } from './transaction.schemas'
+import { institutionResponseSchema } from './transaction.schemas'
+import { listInstitutionsResponseSchema } from './transaction.schemas'
+import { institutionIconParamsSchema } from './transaction.schemas'
 
 const errorResponseSchema = t.Object({
   error: t.String(),
 })
 
 export const transactionController = new Elysia({ prefix: '/transactions' })
+  .get(
+    '/institutions',
+    async () => {
+      return transactionService.listInstitutions()
+    },
+    {
+      response: {
+        200: listInstitutionsResponseSchema,
+      },
+    }
+  )
+  .post(
+    '/institutions',
+    async ({ body, status }) => {
+      try {
+        const icon = body.icon instanceof File ? body.icon : undefined
+        return await transactionService.createInstitution(body.name, icon)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to create institution'
+        return status(400, { error: message })
+      }
+    },
+    {
+      body: createInstitutionBodySchema,
+      response: {
+        200: institutionResponseSchema,
+        400: errorResponseSchema,
+      },
+    }
+  )
+  .get(
+    '/institutions/icon/:fileName',
+    async ({ params, status }) => {
+      try {
+        const icon = await transactionService.getInstitutionIcon(params.fileName)
+        return new Response(icon.buffer, {
+          headers: {
+            'Content-Type': icon.contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        })
+      } catch {
+        return status(404, { error: 'Institution icon not found' })
+      }
+    },
+    {
+      params: institutionIconParamsSchema,
+      response: {
+        404: errorResponseSchema,
+      },
+    }
+  )
   .get(
     '/cycles',
     async () => {

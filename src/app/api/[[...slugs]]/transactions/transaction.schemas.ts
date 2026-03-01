@@ -9,6 +9,7 @@ export const transactionTypeSchema = t.Union([
 ])
 export const transactionCurrencySchema = t.Union([t.Literal('USD'), t.Literal('TRY')])
 export const cycleNameSchema = t.String({ minLength: 1, maxLength: 100 })
+const optionalPartyTextSchema = t.Optional(t.String({ minLength: 1, maxLength: 255 }))
 
 export const createBuyTransactionBodySchema = t.Object({
   cycle: cycleNameSchema,
@@ -19,6 +20,12 @@ export const createBuyTransactionBodySchema = t.Object({
   occurredAt: t.Optional(t.String({ format: 'date-time' })),
   amountReceived: t.Number({ minimum: 0.0000001 }),
   commissionPercent: t.Optional(t.Number({ minimum: 0 })),
+  senderInstitution: optionalPartyTextSchema,
+  senderIban: optionalPartyTextSchema,
+  senderName: optionalPartyTextSchema,
+  recipientInstitution: optionalPartyTextSchema,
+  recipientIban: optionalPartyTextSchema,
+  recipientName: optionalPartyTextSchema,
 })
 
 export const createSellTransactionBodySchema = t.Object({
@@ -29,6 +36,12 @@ export const createSellTransactionBodySchema = t.Object({
   amountReceived: t.Optional(t.Number({ minimum: 0.0000001 })),
   pricePerUnit: t.Optional(t.Number({ minimum: 0.0000001 })),
   commissionPercent: t.Optional(t.Number({ minimum: 0 })),
+  senderInstitution: optionalPartyTextSchema,
+  senderIban: optionalPartyTextSchema,
+  senderName: optionalPartyTextSchema,
+  recipientInstitution: optionalPartyTextSchema,
+  recipientIban: optionalPartyTextSchema,
+  recipientName: optionalPartyTextSchema,
 })
 
 export const createCycleSettlementTransactionBodySchema = t.Object({
@@ -84,6 +97,12 @@ export const transactionResponseSchema = t.Object({
   receivedCurrency: transactionCurrencySchema,
   commissionPercent: t.Union([t.Number(), t.Null()]),
   effectiveRateTry: t.Union([t.Number(), t.Null()]),
+  senderInstitution: t.Union([t.String(), t.Null()]),
+  senderIban: t.Union([t.String(), t.Null()]),
+  senderName: t.Union([t.String(), t.Null()]),
+  recipientInstitution: t.Union([t.String(), t.Null()]),
+  recipientIban: t.Union([t.String(), t.Null()]),
+  recipientName: t.Union([t.String(), t.Null()]),
 })
 
 export const listTransactionsResponseSchema = t.Array(transactionResponseSchema)
@@ -92,12 +111,31 @@ export const createCycleBodySchema = t.Object({
   name: cycleNameSchema,
 })
 
+export const createInstitutionBodySchema = t.Object({
+  name: t.String({ minLength: 1, maxLength: 255 }),
+  icon: t.Optional(t.Any()),
+})
+
+export const institutionResponseSchema = t.Object({
+  id: t.String(),
+  name: t.String(),
+  iconFileName: t.Union([t.String(), t.Null()]),
+  createdAt: t.String({ format: 'date-time' }),
+  updatedAt: t.String({ format: 'date-time' }),
+})
+
+export const listInstitutionsResponseSchema = t.Array(institutionResponseSchema)
+
 export const cycleParamsSchema = t.Object({
   id: t.String(),
 })
 
 export const transactionParamsSchema = t.Object({
   id: t.String(),
+})
+
+export const institutionIconParamsSchema = t.Object({
+  fileName: t.String({ minLength: 1 }),
 })
 
 export const updateCycleBodySchema = t.Object({

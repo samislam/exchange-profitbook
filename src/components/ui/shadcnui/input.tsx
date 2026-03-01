@@ -53,8 +53,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
         rootClassname
       )}
     >
-      {hasStartIcon && <div className="ltr:pr-2 rtl:pl-2">{iconEl}</div>}
-      {hasStartAction && <div className="ltr:pr-2 rtl:pl-2">{startAction}</div>}
+      {hasStartIcon && <div className="flex items-center ltr:pr-2 rtl:pl-2">{iconEl}</div>}
+      {hasStartAction && (
+        <div className="flex items-center self-center ltr:pr-2 rtl:pl-2">{startAction}</div>
+      )}
       <input
         ref={ref}
         dir={dir}
@@ -79,8 +81,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>((props, ref) => {
         )}
         {...rest}
       />
-      {hasEndIcon && <div className="ltr:pl-2 rtl:pr-2">{iconEl}</div>}
-      {hasEndAction && <div className="ltr:pl-2 rtl:pr-2">{endAction}</div>}
+      {hasEndIcon && <div className="flex items-center ltr:pl-2 rtl:pr-2">{iconEl}</div>}
+      {hasEndAction && (
+        <div className="flex items-center self-center ltr:pl-2 rtl:pr-2">{endAction}</div>
+      )}
     </div>
   )
 })

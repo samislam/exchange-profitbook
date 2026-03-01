@@ -1,5 +1,9 @@
 import { Prisma } from '@/generated/prisma'
+import path from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { nanoid } from 'nanoid'
 import { prismaClient } from '@/lib/prisma/prisma-client'
+import appConfig from '@/config/app.config'
 
 type BuyInput = {
   cycle: string
@@ -10,6 +14,12 @@ type BuyInput = {
   occurredAt?: string
   amountReceived: number
   commissionPercent?: number
+  senderInstitution?: string
+  senderIban?: string
+  senderName?: string
+  recipientInstitution?: string
+  recipientIban?: string
+  recipientName?: string
 }
 
 type SellInput = {
@@ -20,6 +30,12 @@ type SellInput = {
   amountReceived?: number
   pricePerUnit?: number
   commissionPercent?: number
+  senderInstitution?: string
+  senderIban?: string
+  senderName?: string
+  recipientInstitution?: string
+  recipientIban?: string
+  recipientName?: string
 }
 
 type CycleSettlementInput = {
@@ -64,6 +80,12 @@ const applyUsdtDelta = (
   return sum + Number(row.amountReceived) - Number(row.amountSold ?? 0)
 }
 
+const normalizeOptionalText = (value: string | undefined) => {
+  if (value === undefined) return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 const toPlainTransaction = (row: {
   id: string
   cycle: { name: string }
@@ -85,6 +107,12 @@ const toPlainTransaction = (row: {
   receivedCurrency: 'USD' | 'TRY'
   commissionPercent: Prisma.Decimal | null
   effectiveRateTry: Prisma.Decimal | null
+  senderInstitution: string | null
+  senderIban: string | null
+  senderName: string | null
+  recipientInstitutionRef: { name: string } | null
+  recipientIban: string | null
+  recipientName: string | null
 }) => ({
   id: row.id,
   cycle: row.cycle.name,
@@ -101,9 +129,108 @@ const toPlainTransaction = (row: {
   receivedCurrency: row.receivedCurrency,
   commissionPercent: decimalToNumber(row.commissionPercent),
   effectiveRateTry: decimalToNumber(row.effectiveRateTry),
+  senderInstitution: row.senderInstitution,
+  senderIban: row.senderIban,
+  senderName: row.senderName,
+  recipientInstitution: row.recipientInstitutionRef?.name ?? null,
+  recipientIban: row.recipientIban,
+  recipientName: row.recipientName,
 })
 
 export class TransactionService {
+  async getInstitutionIcon(fileName: string) {
+    const safeFileName = path.basename(fileName)
+    if (!safeFileName || safeFileName !== fileName) {
+      throw new Error('Invalid icon file name')
+    }
+
+    const absolutePath = path.join(appConfig.uploadDir, safeFileName)
+    const buffer = await readFile(absolutePath)
+    const extension = path.extname(safeFileName).toLowerCase()
+    const contentType =
+      extension === '.png'
+        ? 'image/png'
+        : extension === '.jpg' || extension === '.jpeg'
+          ? 'image/jpeg'
+          : extension === '.webp'
+            ? 'image/webp'
+            : extension === '.gif'
+              ? 'image/gif'
+              : extension === '.svg'
+                ? 'image/svg+xml'
+                : 'application/octet-stream'
+
+    return { buffer, contentType }
+  }
+
+  private async saveInstitutionIconFile(icon: File) {
+    if (!icon.type.startsWith('image/')) {
+      throw new Error('Institution icon must be an image')
+    }
+
+    const ext = path.extname(icon.name || '').toLowerCase() || '.bin'
+    const fileName = `${nanoid()}${ext}`
+    const absolutePath = path.join(appConfig.uploadDir, fileName)
+    const bytes = await icon.arrayBuffer()
+
+    await mkdir(appConfig.uploadDir, { recursive: true })
+    await writeFile(absolutePath, Buffer.from(bytes))
+
+    return fileName
+  }
+
+  private async resolveInstitutionId(name: string | undefined) {
+    const normalized = normalizeOptionalText(name)
+    if (!normalized) return null
+    const institution = await prismaClient.institution.upsert({
+      where: { name: normalized },
+      create: { name: normalized },
+      update: {},
+      select: { id: true },
+    })
+    return institution.id
+  }
+
+  async listInstitutions() {
+    const institutions = await prismaClient.institution.findMany({
+      orderBy: { name: 'asc' },
+    })
+
+    return institutions.map((institution) => ({
+      id: institution.id,
+      name: institution.name,
+      iconFileName: institution.iconFileName,
+      createdAt: institution.createdAt.toISOString(),
+      updatedAt: institution.updatedAt.toISOString(),
+    }))
+  }
+
+  async createInstitution(name: string, icon?: File) {
+    const normalizedName = name.trim()
+    if (!normalizedName) {
+      throw new Error('Institution name is required')
+    }
+
+    const iconFileName = icon ? await this.saveInstitutionIconFile(icon) : undefined
+
+    const institution = await prismaClient.institution.upsert({
+      where: { name: normalizedName },
+      create: {
+        name: normalizedName,
+        iconFileName,
+      },
+      update: iconFileName ? { iconFileName } : {},
+    })
+
+    return {
+      id: institution.id,
+      name: institution.name,
+      iconFileName: institution.iconFileName,
+      createdAt: institution.createdAt.toISOString(),
+      updatedAt: institution.updatedAt.toISOString(),
+    }
+  }
+
   private async getCycleUsdtBalance(cycleId: string, excludeTransactionId?: string) {
     const cycleRows = await prismaClient.tradeTransaction.findMany({
       where: {
@@ -239,7 +366,7 @@ export class TransactionService {
 
   async listTransactions() {
     const rows = await prismaClient.tradeTransaction.findMany({
-      include: { cycle: true },
+      include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
       orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
     })
     return rows.map(toPlainTransaction)
@@ -312,8 +439,14 @@ export class TransactionService {
           receivedCurrency: 'TRY',
           commissionPercent: null,
           effectiveRateTry: null,
+          senderInstitution: null,
+          senderIban: null,
+          senderName: null,
+          recipientInstitutionId: null,
+          recipientIban: null,
+          recipientName: null,
         },
-        include: { cycle: true },
+        include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
       })
 
       return toPlainTransaction(row)
@@ -327,6 +460,7 @@ export class TransactionService {
     })
 
     if (input.type === 'BUY') {
+      const recipientInstitutionId = await this.resolveInstitutionId(input.recipientInstitution)
       const commissionPercent =
         input.commissionPercent !== undefined
           ? input.commissionPercent
@@ -361,8 +495,14 @@ export class TransactionService {
           receivedCurrency: 'TRY',
           commissionPercent,
           effectiveRateTry,
+          senderInstitution: normalizeOptionalText(input.senderInstitution),
+          senderIban: normalizeOptionalText(input.senderIban),
+          senderName: normalizeOptionalText(input.senderName),
+          recipientInstitutionId,
+          recipientIban: normalizeOptionalText(input.recipientIban),
+          recipientName: normalizeOptionalText(input.recipientName),
         },
-        include: { cycle: true },
+        include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
       })
 
       return toPlainTransaction(row)
@@ -375,6 +515,7 @@ export class TransactionService {
       input.amountReceived ?? (input.pricePerUnit as number | undefined)! * netSoldUsdt
     const pricePerUnit = input.pricePerUnit ?? amountReceived / netSoldUsdt
 
+    const recipientInstitutionId = await this.resolveInstitutionId(input.recipientInstitution)
     const row = await prismaClient.tradeTransaction.update({
       where: { id },
       data: {
@@ -390,8 +531,14 @@ export class TransactionService {
         receivedCurrency: 'TRY',
         commissionPercent: input.commissionPercent,
         effectiveRateTry: pricePerUnit,
+        senderInstitution: normalizeOptionalText(input.senderInstitution),
+        senderIban: normalizeOptionalText(input.senderIban),
+        senderName: normalizeOptionalText(input.senderName),
+        recipientInstitutionId,
+        recipientIban: normalizeOptionalText(input.recipientIban),
+        recipientName: normalizeOptionalText(input.recipientName),
       },
-      include: { cycle: true },
+      include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
     })
 
     return toPlainTransaction(row)
@@ -454,7 +601,7 @@ export class TransactionService {
             amountSold: amount,
             receivedCurrency: 'TRY',
           },
-          include: { cycle: true },
+          include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
         }),
         prismaClient.tradeTransaction.create({
           data: {
@@ -465,7 +612,7 @@ export class TransactionService {
             amountSold: null,
             receivedCurrency: 'TRY',
           },
-          include: { cycle: true },
+          include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
         }),
       ])
 
@@ -515,8 +662,14 @@ export class TransactionService {
           amountReceived: input.type === 'DEPOSIT_BALANCE_CORRECTION' ? amount : 0,
           amountSold: input.type === 'WITHDRAW_BALANCE_CORRECTION' ? amount : null,
           receivedCurrency: 'TRY',
+          senderInstitution: null,
+          senderIban: null,
+          senderName: null,
+          recipientInstitutionId: null,
+          recipientIban: null,
+          recipientName: null,
         },
-        include: { cycle: true },
+        include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
       })
 
       return toPlainTransaction(row)
@@ -530,6 +683,7 @@ export class TransactionService {
     })
 
     if (input.type === 'BUY') {
+      const recipientInstitutionId = await this.resolveInstitutionId(input.recipientInstitution)
       const commissionPercent =
         input.commissionPercent !== undefined
           ? input.commissionPercent
@@ -561,8 +715,14 @@ export class TransactionService {
           receivedCurrency: 'TRY',
           commissionPercent,
           effectiveRateTry,
+          senderInstitution: normalizeOptionalText(input.senderInstitution),
+          senderIban: normalizeOptionalText(input.senderIban),
+          senderName: normalizeOptionalText(input.senderName),
+          recipientInstitutionId,
+          recipientIban: normalizeOptionalText(input.recipientIban),
+          recipientName: normalizeOptionalText(input.recipientName),
         },
-        include: { cycle: true },
+        include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
       })
 
       return toPlainTransaction(row)
@@ -575,6 +735,7 @@ export class TransactionService {
       input.amountReceived ?? (input.pricePerUnit as number | undefined)! * netSoldUsdt
     const pricePerUnit = input.pricePerUnit ?? amountReceived / netSoldUsdt
 
+    const recipientInstitutionId = await this.resolveInstitutionId(input.recipientInstitution)
     const row = await prismaClient.tradeTransaction.create({
       data: {
         cycleId: cycle.id,
@@ -586,8 +747,14 @@ export class TransactionService {
         receivedCurrency: 'TRY',
         commissionPercent: input.commissionPercent,
         effectiveRateTry: pricePerUnit,
+        senderInstitution: normalizeOptionalText(input.senderInstitution),
+        senderIban: normalizeOptionalText(input.senderIban),
+        senderName: normalizeOptionalText(input.senderName),
+        recipientInstitutionId,
+        recipientIban: normalizeOptionalText(input.recipientIban),
+        recipientName: normalizeOptionalText(input.recipientName),
       },
-      include: { cycle: true },
+      include: { cycle: true, recipientInstitutionRef: { select: { name: true } } },
     })
 
     return toPlainTransaction(row)

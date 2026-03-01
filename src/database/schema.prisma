@@ -42,11 +42,19 @@ model TradeTransaction {
   receivedCurrency    TransactionCurrency @default(TRY)
   commissionPercent   Decimal?            @db.Decimal(8, 4)
   effectiveRateTry    Decimal?            @db.Decimal(18, 6)
+  senderInstitution   String?
+  senderIban          String?
+  senderName          String?
+  recipientInstitutionId String?
+  recipientInstitutionRef Institution?        @relation(fields: [recipientInstitutionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  recipientIban       String?
+  recipientName       String?
   occurredAt          DateTime            @default(now())
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
   @@index([cycleId])
+  @@index([recipientInstitutionId])
 }
 
 model TradeCycle {
@@ -55,4 +63,13 @@ model TradeCycle {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   transactions TradeTransaction[]
+}
+
+model Institution {
+  id                    String             @id @default(uuid())
+  name                  String             @unique
+  iconFileName          String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  recipientTransactions TradeTransaction[]
 }

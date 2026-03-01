@@ -6,21 +6,25 @@ import usdtIcon from '@/media/usdt.svg'
 import { appApi } from '@/lib/elysia/eden'
 import { CURRENCY_SYMBOLS } from '@/constants'
 import { parseAsString, useQueryState } from 'nuqs'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppTabs } from '../../composables/app-tabs'
 import { Input } from '@/components/ui/shadcnui/input'
 import { Alert } from '@/components/ui/shadcnui/alert'
 import { Button } from '@/components/ui/shadcnui/button'
+import { Combobox } from '@/components/ui/shadcnui/combobox'
 import { ButtonWithTooltip } from '@/components/ui/shadcnui/button'
+import { Accordion } from '@/components/ui/shadcnui/accordion'
 import { Select } from '@/components/ui/shadcnui/select'
 import { Dialog } from '@/components/ui/shadcnui/dialog'
 import { AlertTitle } from '@/components/ui/shadcnui/alert'
+import { AccordionItem } from '@/components/ui/shadcnui/accordion'
 import { SelectItem } from '@/components/ui/shadcnui/select'
 import { AlertTriangle, Plus, RotateCcw } from 'lucide-react'
 import { SelectValue } from '@/components/ui/shadcnui/select'
 import { DialogTitle } from '@/components/ui/shadcnui/dialog'
 import { CycleToolbar } from '../../composables/cycle-toolbar'
 import { NumberInput } from '@/components/common/number-input'
+import { AccordionTrigger } from '@/components/ui/shadcnui/accordion'
 import { DialogHeader } from '@/components/ui/shadcnui/dialog'
 import { DialogFooter } from '@/components/ui/shadcnui/dialog'
 import { SelectTrigger } from '@/components/ui/shadcnui/select'
@@ -29,6 +33,7 @@ import { DialogTrigger } from '@/components/ui/shadcnui/dialog'
 import { DialogContent } from '@/components/ui/shadcnui/dialog'
 import { AlertDescription } from '@/components/ui/shadcnui/alert'
 import { ThemeSwitcher } from '@/components/common/theme-switcher'
+import { AccordionContent } from '@/components/ui/shadcnui/accordion'
 import { DialogDescription } from '@/components/ui/shadcnui/dialog'
 import { TradebookCharts } from '../../composables/tradebook-charts'
 import { LogoutIconButton } from '@/components/common/logout-icon-button'
@@ -54,6 +59,14 @@ type TradeCycle = {
   updatedAt: string
 }
 
+type Institution = {
+  id: string
+  name: string
+  iconFileName: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 type TradeTransaction = {
   id: string
   cycle: string
@@ -70,6 +83,12 @@ type TradeTransaction = {
   receivedCurrency: TransactionCurrency
   commissionPercent: number | null
   effectiveRateTry: number | null
+  senderInstitution: string | null
+  senderIban: string | null
+  senderName: string | null
+  recipientInstitution: string | null
+  recipientIban: string | null
+  recipientName: string | null
 }
 
 const nowDateTimeLocal = () => {
@@ -188,10 +207,12 @@ const TradebookPage = () => {
   const [isCycleDialogOpen, setIsCycleDialogOpen] = useState(false)
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null)
   const [transactions, setTransactions] = useState<TradeTransaction[]>([])
+  const [institutions, setInstitutions] = useState<Institution[]>([])
   const [cycles, setCycles] = useState<TradeCycle[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isCycleSaving, setIsCycleSaving] = useState(false)
+  const [isInstitutionSaving, setIsInstitutionSaving] = useState(false)
   const [isCycleRenaming, setIsCycleRenaming] = useState(false)
   const [isCycleUndoing, setIsCycleUndoing] = useState(false)
   const [isCycleDeleting, setIsCycleDeleting] = useState(false)
@@ -227,6 +248,20 @@ const TradebookPage = () => {
   const [settlementToCycle, setSettlementToCycle] = useState('')
   const [settlementAmount, setSettlementAmount] = useState('')
   const [correctionAmount, setCorrectionAmount] = useState('')
+  const [senderInstitution, setSenderInstitution] = useState('')
+  const [senderIban, setSenderIban] = useState('')
+  const [senderName, setSenderName] = useState('')
+  const [recipientInstitution, setRecipientInstitution] = useState('')
+  const [recipientIban, setRecipientIban] = useState('')
+  const [recipientName, setRecipientName] = useState('')
+  const [isInstitutionDialogOpen, setIsInstitutionDialogOpen] = useState(false)
+  const [newInstitutionName, setNewInstitutionName] = useState('')
+  const [newInstitutionIcon, setNewInstitutionIcon] = useState<File | null>(null)
+  const [newInstitutionIconPreviewUrl, setNewInstitutionIconPreviewUrl] = useState<string | null>(
+    null
+  )
+  const institutionIconInputRef = useRef<HTMLInputElement | null>(null)
+  const [institutionTarget, setInstitutionTarget] = useState<'sender' | 'recipient' | null>(null)
   const [newCycleName, setNewCycleName] = useState('')
   const [cycleSearchTerm, setCycleSearchTerm] = useState('')
   const [isCycleComboboxOpen, setIsCycleComboboxOpen] = useState(false)
@@ -300,9 +335,30 @@ const TradebookPage = () => {
     }
   }
 
+  const loadInstitutions = async () => {
+    try {
+      const { data, error } = await appApi.transactions.institutions.get()
+      if (error) {
+        const message =
+          typeof error.value === 'object' &&
+          error.value &&
+          'error' in error.value &&
+          typeof error.value.error === 'string'
+            ? error.value.error
+            : 'Failed to load institutions'
+        throw new Error(message)
+      }
+      setInstitutions((data as Institution[]).sort((a, b) => a.name.localeCompare(b.name)))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load institutions'
+      appToast.info(message)
+    }
+  }
+
   useEffect(() => {
     void loadTransactions()
     void loadCycles()
+    void loadInstitutions()
   }, [])
 
   const resetForm = () => {
@@ -329,6 +385,16 @@ const TradebookPage = () => {
     setSettlementToCycle('')
     setSettlementAmount('')
     setCorrectionAmount('')
+    setSenderInstitution('')
+    setSenderIban('')
+    setSenderName('')
+    setRecipientInstitution('')
+    setRecipientIban('')
+    setRecipientName('')
+    setNewInstitutionName('')
+    setNewInstitutionIcon(null)
+    setNewInstitutionIconPreviewUrl(null)
+    setInstitutionTarget(null)
   }
 
   const createTransaction = async (forceUnsafeEdit = false) => {
@@ -418,6 +484,12 @@ const TradebookPage = () => {
               occurredAt: occurredAtIso,
               amountReceived: normalizedBuyAmountReceived,
               commissionPercent: buyCommissionPercent,
+              senderInstitution: senderInstitution.trim() || undefined,
+              senderIban: senderIban.trim() || undefined,
+              senderName: senderName.trim() || undefined,
+              recipientInstitution: recipientInstitution.trim() || undefined,
+              recipientIban: recipientIban.trim() || undefined,
+              recipientName: recipientName.trim() || undefined,
             }
           })()
         : transactionType === 'SELL'
@@ -445,6 +517,12 @@ const TradebookPage = () => {
                 if (!Number.isFinite(soldUsdt) || soldUsdt <= 0) return Number.NaN
                 return (feeValue / soldUsdt) * 100
               })(),
+              senderInstitution: senderInstitution.trim() || undefined,
+              senderIban: senderIban.trim() || undefined,
+              senderName: senderName.trim() || undefined,
+              recipientInstitution: recipientInstitution.trim() || undefined,
+              recipientIban: recipientIban.trim() || undefined,
+              recipientName: recipientName.trim() || undefined,
             }
           : transactionType === 'CYCLE_SETTLEMENT'
             ? {
@@ -1023,6 +1101,12 @@ const TradebookPage = () => {
       setSettlementAmount('')
       setSettlementToCycle('')
       setCorrectionAmount('')
+      setSenderInstitution(transaction.senderInstitution ?? '')
+      setSenderIban(transaction.senderIban ?? '')
+      setSenderName(transaction.senderName ?? '')
+      setRecipientInstitution(transaction.recipientInstitution ?? '')
+      setRecipientIban(transaction.recipientIban ?? '')
+      setRecipientName(transaction.recipientName ?? '')
     } else if (transaction.type === 'SELL') {
       setSellAmountSold(toInputNumber(transaction.amountSold))
       if (transaction.pricePerUnit !== null) {
@@ -1046,6 +1130,12 @@ const TradebookPage = () => {
       setSettlementAmount('')
       setSettlementToCycle('')
       setCorrectionAmount('')
+      setSenderInstitution(transaction.senderInstitution ?? '')
+      setSenderIban(transaction.senderIban ?? '')
+      setSenderName(transaction.senderName ?? '')
+      setRecipientInstitution(transaction.recipientInstitution ?? '')
+      setRecipientIban(transaction.recipientIban ?? '')
+      setRecipientName(transaction.recipientName ?? '')
     } else if (
       transaction.type === 'DEPOSIT_BALANCE_CORRECTION' ||
       transaction.type === 'WITHDRAW_BALANCE_CORRECTION'
@@ -1066,6 +1156,12 @@ const TradebookPage = () => {
       setSellFee('')
       setSettlementAmount('')
       setSettlementToCycle('')
+      setSenderInstitution('')
+      setSenderIban('')
+      setSenderName('')
+      setRecipientInstitution('')
+      setRecipientIban('')
+      setRecipientName('')
     } else {
       appToast.info('Cycle settlement transactions cannot be edited yet')
       return
@@ -1287,11 +1383,166 @@ const TradebookPage = () => {
     setIsCycleComboboxOpen(false)
   }, [selectedCycle])
 
+  useEffect(() => {
+    if (!newInstitutionIcon) {
+      setNewInstitutionIconPreviewUrl(null)
+      return
+    }
+    const previewUrl = URL.createObjectURL(newInstitutionIcon)
+    setNewInstitutionIconPreviewUrl(previewUrl)
+    return () => {
+      URL.revokeObjectURL(previewUrl)
+    }
+  }, [newInstitutionIcon])
+
   const filteredCycleOptions = useMemo(() => {
     const q = cycleSearchTerm.trim().toLowerCase()
     if (!q) return cycleOptions
     return cycleOptions.filter((cycleItem) => cycleItem.name.toLowerCase().includes(q))
   }, [cycleOptions, cycleSearchTerm])
+
+  const institutionOptions = useMemo(() => {
+    const map = new Map<string, string | null>()
+    for (const institution of institutions) {
+      map.set(institution.name, institution.iconFileName)
+    }
+    for (const transaction of transactions) {
+      if (transaction.senderInstitution && !map.has(transaction.senderInstitution)) {
+        map.set(transaction.senderInstitution, null)
+      }
+      if (transaction.recipientInstitution && !map.has(transaction.recipientInstitution)) {
+        map.set(transaction.recipientInstitution, null)
+      }
+    }
+    return Array.from(map.entries())
+      .map(([name, iconFileName]) => ({ name, iconFileName }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [institutions, transactions])
+
+  const getInstitutionIconSrc = (iconFileName: string | null) =>
+    iconFileName ? `/api/transactions/institutions/icon/${encodeURIComponent(iconFileName)}` : null
+
+  const renderInstitutionCombobox = (
+    role: 'sender' | 'recipient',
+    value: string,
+    onValueChange: (nextValue: string) => void
+  ) => {
+    const selected = institutionOptions.find(
+      (option) => option.name.toLowerCase() === value.trim().toLowerCase()
+    )
+
+    return (
+      <Combobox
+        value={value}
+        options={institutionOptions.map((option) => ({ value: option.name, label: option.name }))}
+        placeholder="Select institution"
+        emptyText="No institutions found"
+        onValueChange={onValueChange}
+        startAction={
+          selected?.iconFileName ? (
+            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-sm">
+              <Image
+                src={getInstitutionIconSrc(selected.iconFileName) as string}
+                alt={selected.name}
+                width={16}
+                height={16}
+                unoptimized
+                className="block h-full w-full object-cover"
+              />
+            </span>
+          ) : undefined
+        }
+        endAction={
+          <Button
+            type="button"
+            variant="icon"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => openInstitutionDialog(role)}
+            aria-label="Create institution"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        }
+        renderOption={(option) => {
+          const match = institutionOptions.find((item) => item.name === option.value)
+          return (
+            <div className="flex items-center gap-2">
+              {match?.iconFileName ? (
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-sm">
+                  <Image
+                    src={getInstitutionIconSrc(match.iconFileName) as string}
+                    alt={option.value}
+                    width={16}
+                    height={16}
+                    unoptimized
+                    className="block h-full w-full object-cover"
+                  />
+                </span>
+              ) : (
+                <span className="bg-muted h-4 w-4 rounded-sm" aria-hidden />
+              )}
+              <span className="truncate">{option.label ?? option.value}</span>
+            </div>
+          )
+        }}
+      />
+    )
+  }
+
+  const openInstitutionDialog = (target: 'sender' | 'recipient') => {
+    setInstitutionTarget(target)
+    setNewInstitutionName('')
+    setNewInstitutionIcon(null)
+    setIsInstitutionDialogOpen(true)
+  }
+
+  const createInstitution = async () => {
+    const name = newInstitutionName.trim()
+    if (!name) return
+    setIsInstitutionSaving(true)
+    try {
+      const payload = {
+        name,
+        icon: newInstitutionIcon ?? undefined,
+      }
+      const { data, error } = await appApi.transactions.institutions.post(payload)
+      if (error) {
+        const message =
+          typeof error.value === 'object' &&
+          error.value &&
+          'error' in error.value &&
+          typeof error.value.error === 'string'
+            ? error.value.error
+            : 'Failed to create institution'
+        throw new Error(message)
+      }
+
+      const created = data as Institution
+      setInstitutions((prev) => {
+        const withoutCurrent = prev.filter(
+          (institutionItem) =>
+            institutionItem.id !== created.id && institutionItem.name !== created.name
+        )
+        return [...withoutCurrent, created].sort((a, b) => a.name.localeCompare(b.name))
+      })
+      if (institutionTarget === 'sender') {
+        setSenderInstitution(created.name)
+      } else if (institutionTarget === 'recipient') {
+        setRecipientInstitution(created.name)
+      }
+      setIsInstitutionDialogOpen(false)
+      setNewInstitutionName('')
+      setNewInstitutionIcon(null)
+      setInstitutionTarget(null)
+      appToast.success('Institution created')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create institution'
+      appToast.fail(message)
+    } finally {
+      setIsInstitutionSaving(false)
+    }
+  }
 
   const nextCycleName = useMemo(
     () => getNextCycleName(cycleOptions.map((cycleItem) => cycleItem.name)),
@@ -1621,6 +1872,81 @@ const TradebookPage = () => {
                           </div>
                         </div>
 
+                        <div className="md:col-span-2">
+                          <Accordion type="single" collapsible className="rounded-lg border px-3">
+                            <AccordionItem value="buy-party-info" className="border-b-0">
+                              <AccordionTrigger className="py-3 text-sm font-semibold hover:no-underline">
+                                Sender & recipient information
+                              </AccordionTrigger>
+                              <AccordionContent className="pt-1">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                  <div className="rounded-lg border border-[hsl(var(--border))] p-3">
+                                    <p className="mb-3 text-sm font-semibold">Sender information</p>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Institution</p>
+                                        {renderInstitutionCombobox(
+                                          'sender',
+                                          senderInstitution,
+                                          setSenderInstitution
+                                        )}
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">IBAN</p>
+                                        <Input
+                                          value={senderIban}
+                                          onChange={(event) => setSenderIban(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Name</p>
+                                        <Input
+                                          value={senderName}
+                                          onChange={(event) => setSenderName(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-lg border border-[hsl(var(--border))] p-3">
+                                    <p className="mb-3 text-sm font-semibold">
+                                      Recipient information
+                                    </p>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Institution</p>
+                                        {renderInstitutionCombobox(
+                                          'recipient',
+                                          recipientInstitution,
+                                          setRecipientInstitution
+                                        )}
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">IBAN</p>
+                                        <Input
+                                          value={recipientIban}
+                                          onChange={(event) => setRecipientIban(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Name</p>
+                                        <Input
+                                          value={recipientName}
+                                          onChange={(event) => setRecipientName(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        </div>
+
                         <div>
                           <p className="mb-2 text-sm font-semibold">Datetime</p>
                           <Input
@@ -1747,6 +2073,81 @@ const TradebookPage = () => {
                               />
                             </div>
                           </div>
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <Accordion type="single" collapsible className="rounded-lg border px-3">
+                            <AccordionItem value="sell-party-info" className="border-b-0">
+                              <AccordionTrigger className="py-3 text-sm font-semibold hover:no-underline">
+                                Sender & recipient information
+                              </AccordionTrigger>
+                              <AccordionContent className="pt-1">
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                  <div className="rounded-lg border border-[hsl(var(--border))] p-3">
+                                    <p className="mb-3 text-sm font-semibold">Sender information</p>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Institution</p>
+                                        {renderInstitutionCombobox(
+                                          'sender',
+                                          senderInstitution,
+                                          setSenderInstitution
+                                        )}
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">IBAN</p>
+                                        <Input
+                                          value={senderIban}
+                                          onChange={(event) => setSenderIban(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Name</p>
+                                        <Input
+                                          value={senderName}
+                                          onChange={(event) => setSenderName(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-lg border border-[hsl(var(--border))] p-3">
+                                    <p className="mb-3 text-sm font-semibold">
+                                      Recipient information
+                                    </p>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Institution</p>
+                                        {renderInstitutionCombobox(
+                                          'recipient',
+                                          recipientInstitution,
+                                          setRecipientInstitution
+                                        )}
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">IBAN</p>
+                                        <Input
+                                          value={recipientIban}
+                                          onChange={(event) => setRecipientIban(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="mb-2 text-xs font-semibold">Name</p>
+                                        <Input
+                                          value={recipientName}
+                                          onChange={(event) => setRecipientName(event.target.value)}
+                                          placeholder="Optional"
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
                         </div>
 
                         <div>
@@ -1893,6 +2294,83 @@ const TradebookPage = () => {
             </Dialog>
           </div>
         </div>
+        <Dialog
+          open={isInstitutionDialogOpen}
+          onOpenChange={(open) => {
+            setIsInstitutionDialogOpen(open)
+            if (!open) {
+              setNewInstitutionName('')
+              setNewInstitutionIcon(null)
+              setNewInstitutionIconPreviewUrl(null)
+              setInstitutionTarget(null)
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create institution</DialogTitle>
+              <DialogDescription>Add a new institution name to use in this form.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">Institution</p>
+              <div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-3">
+                <input
+                  ref={institutionIconInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => setNewInstitutionIcon(event.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  className="bg-muted hover:bg-muted/70 flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-md border"
+                  onClick={() => institutionIconInputRef.current?.click()}
+                  aria-label="Upload institution icon"
+                >
+                  {newInstitutionIconPreviewUrl ? (
+                    <Image
+                      src={newInstitutionIconPreviewUrl}
+                      alt="Institution icon preview"
+                      width={64}
+                      height={64}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Plus className="text-muted-foreground h-5 w-5" />
+                  )}
+                </button>
+                <Input
+                  value={newInstitutionName}
+                  onChange={(event) => setNewInstitutionName(event.target.value)}
+                  placeholder="Institution name"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsInstitutionDialogOpen(false)
+                  setNewInstitutionName('')
+                  setNewInstitutionIcon(null)
+                  setNewInstitutionIconPreviewUrl(null)
+                  setInstitutionTarget(null)
+                }}
+                disabled={isInstitutionSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void createInstitution()}
+                disabled={!newInstitutionName.trim() || isInstitutionSaving}
+              >
+                {isInstitutionSaving ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {cycleToolbarError && <p className="mt-2 text-sm text-red-600">{cycleToolbarError}</p>}
         <Dialog
           open={pendingCycleAction !== null}
@@ -2255,6 +2733,30 @@ const TradebookPage = () => {
                 {selectedTransaction.effectiveRateTry === null
                   ? '-'
                   : formatAmount(selectedTransaction.effectiveRateTry)}
+              </p>
+              <p>
+                <span className="font-semibold">Sender institution:</span>{' '}
+                {selectedTransaction.senderInstitution ?? '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Sender IBAN:</span>{' '}
+                {selectedTransaction.senderIban ?? '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Sender name:</span>{' '}
+                {selectedTransaction.senderName ?? '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Recipient institution:</span>{' '}
+                {selectedTransaction.recipientInstitution ?? '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Recipient IBAN:</span>{' '}
+                {selectedTransaction.recipientIban ?? '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Recipient name:</span>{' '}
+                {selectedTransaction.recipientName ?? '-'}
               </p>
             </div>
           )}

@@ -1,24 +1,24 @@
 'use client'
 
 import Image from 'next/image'
+import { appToast } from '@/lib/toast'
+import usdtIcon from '@/media/usdt.svg'
 import { appApi } from '@/lib/elysia/eden'
 import { CURRENCY_SYMBOLS } from '@/constants'
-import { useEffect, useMemo, useState } from 'react'
 import { parseAsString, useQueryState } from 'nuqs'
-import { Plus, RotateCcw } from 'lucide-react'
-import usdtIcon from '@/media/usdt.svg'
+import { useEffect, useMemo, useState } from 'react'
 import { AppTabs } from '../../composables/app-tabs'
-import { appToast } from '@/lib/toast'
-import { CycleToolbar } from '../../composables/cycle-toolbar'
-import { TradebookCharts } from '../../composables/tradebook-charts'
 import { Input } from '@/components/ui/shadcnui/input'
+import { Alert } from '@/components/ui/shadcnui/alert'
 import { Button } from '@/components/ui/shadcnui/button'
 import { Select } from '@/components/ui/shadcnui/select'
 import { Dialog } from '@/components/ui/shadcnui/dialog'
-import { ToggleGroup } from '@/components/ui/shadcnui/toggle-group'
+import { AlertTitle } from '@/components/ui/shadcnui/alert'
 import { SelectItem } from '@/components/ui/shadcnui/select'
+import { AlertTriangle, Plus, RotateCcw } from 'lucide-react'
 import { SelectValue } from '@/components/ui/shadcnui/select'
 import { DialogTitle } from '@/components/ui/shadcnui/dialog'
+import { CycleToolbar } from '../../composables/cycle-toolbar'
 import { NumberInput } from '@/components/common/number-input'
 import { DialogHeader } from '@/components/ui/shadcnui/dialog'
 import { DialogFooter } from '@/components/ui/shadcnui/dialog'
@@ -26,15 +26,17 @@ import { SelectTrigger } from '@/components/ui/shadcnui/select'
 import { SelectContent } from '@/components/ui/shadcnui/select'
 import { DialogTrigger } from '@/components/ui/shadcnui/dialog'
 import { DialogContent } from '@/components/ui/shadcnui/dialog'
-import { ToggleGroupItem } from '@/components/ui/shadcnui/toggle-group'
+import { AlertDescription } from '@/components/ui/shadcnui/alert'
 import { ThemeSwitcher } from '@/components/common/theme-switcher'
 import { DialogDescription } from '@/components/ui/shadcnui/dialog'
+import { TradebookCharts } from '../../composables/tradebook-charts'
 import { LogoutIconButton } from '@/components/common/logout-icon-button'
 import { TradebookTransactionsTable } from '../../composables/tradebook-transactions-table'
 
 type TransactionType = 'BUY' | 'SELL'
 type TransactionCurrency = 'USD' | 'TRY'
 type SellInputMode = 'amount-received' | 'price-per-unit'
+type SellFeeUnit = 'percent' | 'usdt'
 type PendingCycleAction = 'undo-last' | 'reset-cycle' | 'delete-cycle' | null
 
 type TradeCycle = {
@@ -68,17 +70,17 @@ const nowDateTimeLocal = () => {
   return local.toISOString().slice(0, 16)
 }
 
-const formatUsdt = (value: number) =>
-  value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
+const truncateToTwoDecimals = (value: number) => Math.trunc(value * 100) / 100
+
+const formatAmount = (value: number) =>
+  truncateToTwoDecimals(value).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })
 
-const formatTry = (value: number) =>
-  value.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })
+const formatUsdt = (value: number) => formatAmount(value)
+
+const formatTry = (value: number) => formatAmount(value)
 
 const formatDateOnly = (value: string) =>
   new Date(value).toLocaleDateString('en-US', {
@@ -104,8 +106,6 @@ const sortByOccurredAt = (transactions: TradeTransaction[]) =>
   [...transactions].sort(
     (a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()
   )
-
-const BALANCE_EXCEEDED_ERROR_PREFIX = "Amount sold can't exceed available USDT balance"
 
 const calculateRealizedTryProfit = (transactions: TradeTransaction[]) => {
   const ordered = sortByOccurredAt(transactions)
@@ -190,7 +190,9 @@ const TradebookPage = () => {
   const [sellAmountSold, setSellAmountSold] = useState('')
   const [sellAmountReceived, setSellAmountReceived] = useState('')
   const [sellPricePerUnit, setSellPricePerUnit] = useState('')
-  const [sellInputMode, setSellInputMode] = useState<SellInputMode>('amount-received')
+  const [sellFee, setSellFee] = useState('')
+  const [sellFeeUnit, setSellFeeUnit] = useState<SellFeeUnit>('usdt')
+  const [sellInputMode, setSellInputMode] = useState<SellInputMode>('price-per-unit')
   const [newCycleName, setNewCycleName] = useState('')
   const [cycleSearchTerm, setCycleSearchTerm] = useState('')
   const [isCycleComboboxOpen, setIsCycleComboboxOpen] = useState(false)
@@ -210,14 +212,11 @@ const TradebookPage = () => {
     if (!cycleName) return 0
     return Math.max(0, getCycleUsdtBalance(cycleName))
   })()
-
-  const setBalanceExceededError = (balance: number) => {
-    setErrorMessage(`${BALANCE_EXCEEDED_ERROR_PREFIX} (${formatUsdt(balance)})`)
-  }
-
-  const clearBalanceExceededErrorIfAny = () => {
-    setErrorMessage((prev) => (prev?.startsWith(BALANCE_EXCEEDED_ERROR_PREFIX) ? null : prev))
-  }
+  const sellAmountSoldValue = Number.parseFloat(sellAmountSold)
+  const isSellBalanceWarningVisible =
+    transactionType === 'SELL' &&
+    Number.isFinite(sellAmountSoldValue) &&
+    sellAmountSoldValue > availableCycleUsdtBalance + Number.EPSILON
 
   const loadTransactions = async () => {
     setIsLoading(true)
@@ -284,7 +283,9 @@ const TradebookPage = () => {
     setSellAmountSold('')
     setSellAmountReceived('')
     setSellPricePerUnit('')
-    setSellInputMode('amount-received')
+    setSellFee('')
+    setSellFeeUnit('usdt')
+    setSellInputMode('price-per-unit')
   }
 
   const createTransaction = async () => {
@@ -332,6 +333,17 @@ const TradebookPage = () => {
               sellInputMode === 'price-per-unit' && sellPricePerUnit
                 ? Number.parseFloat(sellPricePerUnit)
                 : undefined,
+            commissionPercent: (() => {
+              if (!sellFee) return undefined
+              const feeValue = Number.parseFloat(sellFee)
+              if (!Number.isFinite(feeValue)) return Number.NaN
+              if (sellFeeUnit === 'percent') return feeValue
+
+              const soldUsdt = Number.parseFloat(sellAmountSold)
+
+              if (!Number.isFinite(soldUsdt) || soldUsdt <= 0) return Number.NaN
+              return (feeValue / soldUsdt) * 100
+            })(),
           }
 
     if (payload.type === 'BUY') {
@@ -358,11 +370,6 @@ const TradebookPage = () => {
         setErrorMessage('Amount sold must be greater than 0')
         return
       }
-      const availableBalance = Math.max(0, getCycleUsdtBalance(effectiveCycle))
-      if (payload.amountSold > availableBalance + Number.EPSILON) {
-        setBalanceExceededError(availableBalance)
-        return
-      }
       if (sellInputMode === 'amount-received' && !payload.amountReceived) {
         setErrorMessage('For SELL, provide amount received')
         return
@@ -383,6 +390,13 @@ const TradebookPage = () => {
         (!Number.isFinite(payload.pricePerUnit) || payload.pricePerUnit <= 0)
       ) {
         setErrorMessage('Price per unit must be greater than 0')
+        return
+      }
+      if (
+        payload.commissionPercent !== undefined &&
+        (!Number.isFinite(payload.commissionPercent) || payload.commissionPercent < 0)
+      ) {
+        setErrorMessage('Fee must be 0 or greater')
         return
       }
     }
@@ -882,6 +896,15 @@ const TradebookPage = () => {
                   <DialogTitle>Create transaction</DialogTitle>
                   <DialogDescription>Add a BUY or SELL trade entry.</DialogDescription>
                 </DialogHeader>
+                {isSellBalanceWarningVisible && (
+                  <Alert className="mt-2 border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Balance warning</AlertTitle>
+                    <AlertDescription>
+                      Amount sold is higher than this cycle&apos;s available USDT balance.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <form
                   onSubmit={(event) => {
                     event.preventDefault()
@@ -935,6 +958,25 @@ const TradebookPage = () => {
                           placeholder="Search cycle..."
                           disabled={isCycleLockedBySelection}
                           readOnly={isCycleLockedBySelection}
+                          endAction={
+                            isCycleLockedBySelection ? null : (
+                              <Button
+                                type="button"
+                                variant="icon"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => {
+                                  setIsCycleComboboxOpen(false)
+                                  setCycleErrorMessage(null)
+                                  setNewCycleName(nextCycleName)
+                                  setIsCycleDialogOpen(true)
+                                }}
+                                aria-label="Create new cycle"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                            )
+                          }
                           rootClassname={
                             isCycleLockedBySelection
                               ? 'bg-muted/70 border-border cursor-not-allowed opacity-80'
@@ -1046,28 +1088,7 @@ const TradebookPage = () => {
                           <p className="mb-2 text-sm font-semibold">Amount sold (USDT)</p>
                           <NumberInput
                             value={sellAmountSold}
-                            onChange={(value) => {
-                              if (!value) {
-                                setSellAmountSold('')
-                                clearBalanceExceededErrorIfAny()
-                                return
-                              }
-
-                              const parsed = Number.parseFloat(value)
-                              if (!Number.isFinite(parsed)) {
-                                setSellAmountSold(value)
-                                return
-                              }
-
-                              if (parsed > availableCycleUsdtBalance + Number.EPSILON) {
-                                setSellAmountSold(availableCycleUsdtBalance.toString())
-                                setBalanceExceededError(availableCycleUsdtBalance)
-                                return
-                              }
-
-                              setSellAmountSold(value)
-                              clearBalanceExceededErrorIfAny()
-                            }}
+                            onChange={setSellAmountSold}
                             startAction={
                               <span className="text-muted-foreground text-sm">
                                 {CURRENCY_SYMBOLS.USDT}
@@ -1082,7 +1103,6 @@ const TradebookPage = () => {
                                     .toFixed(4)
                                     .replace(/\.?0+$/, '')
                                   setSellAmountSold(maxValue)
-                                  clearBalanceExceededErrorIfAny()
                                 }}
                               >
                                 MAX
@@ -1094,56 +1114,87 @@ const TradebookPage = () => {
                           </p>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                          <div>
-                            <p className="mb-2 text-sm font-semibold">
-                              {sellInputMode === 'amount-received'
-                                ? 'Amount received (TRY)'
-                                : 'Price per unit (TRY)'}
-                            </p>
-                            {sellInputMode === 'amount-received' ? (
-                              <NumberInput
-                                value={sellAmountReceived}
-                                onChange={setSellAmountReceived}
-                                startAction={
-                                  <span className="text-muted-foreground text-sm">
-                                    {CURRENCY_SYMBOLS.TRY}
-                                  </span>
-                                }
-                              />
-                            ) : (
-                              <NumberInput
-                                value={sellPricePerUnit}
-                                onChange={setSellPricePerUnit}
-                                startAction={
-                                  <span className="text-muted-foreground text-sm">
-                                    {CURRENCY_SYMBOLS.TRY}
-                                  </span>
-                                }
-                              />
-                            )}
-                          </div>
-
-                          <ToggleGroup
-                            type="single"
-                            value={sellInputMode}
-                            onValueChange={(value) => {
-                              if (!value) return
-                              const nextMode = value as SellInputMode
-                              setSellInputMode(nextMode)
-                              if (nextMode === 'amount-received') {
-                                setSellPricePerUnit('')
-                              } else {
-                                setSellAmountReceived('')
+                        <div className="md:col-span-2">
+                          <p className="mb-2 text-sm font-semibold">
+                            {sellInputMode === 'amount-received'
+                              ? 'Amount received (TRY)'
+                              : 'Price per unit (TRY)'}
+                          </p>
+                          {sellInputMode === 'amount-received' ? (
+                            <NumberInput
+                              value={sellAmountReceived}
+                              onChange={setSellAmountReceived}
+                              startAction={
+                                <span className="text-muted-foreground text-sm">
+                                  {CURRENCY_SYMBOLS.TRY}
+                                </span>
                               }
-                            }}
-                            className="justify-start md:justify-end"
-                          >
-                            <ToggleGroupItem value="amount-received">
-                              Amount received
-                            </ToggleGroupItem>
-                            <ToggleGroupItem value="price-per-unit">Price per unit</ToggleGroupItem>
-                          </ToggleGroup>
+                              endAction={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => {
+                                    setSellInputMode('price-per-unit')
+                                    setSellAmountReceived('')
+                                  }}
+                                >
+                                  Price per unit
+                                </Button>
+                              }
+                            />
+                          ) : (
+                            <NumberInput
+                              value={sellPricePerUnit}
+                              onChange={setSellPricePerUnit}
+                              startAction={
+                                <span className="text-muted-foreground text-sm">
+                                  {CURRENCY_SYMBOLS.TRY}
+                                </span>
+                              }
+                              endAction={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={() => {
+                                    setSellInputMode('amount-received')
+                                    setSellPricePerUnit('')
+                                  }}
+                                >
+                                  Amount received
+                                </Button>
+                              }
+                            />
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-sm font-semibold">
+                            Fee ({sellFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT})
+                          </p>
+                          <NumberInput
+                            value={sellFee}
+                            onChange={setSellFee}
+                            placeholder="0.00"
+                            endAction={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 min-w-9 px-2 text-xs"
+                                onClick={() =>
+                                  setSellFeeUnit((prev) =>
+                                    prev === 'percent' ? 'usdt' : 'percent'
+                                  )
+                                }
+                              >
+                                {sellFeeUnit === 'percent' ? '%' : CURRENCY_SYMBOLS.USDT}
+                              </Button>
+                            }
+                          />
                         </div>
                       </>
                     )}

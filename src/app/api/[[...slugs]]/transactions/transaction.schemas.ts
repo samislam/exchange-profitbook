@@ -21,6 +21,7 @@ export const createSellTransactionBodySchema = t.Object({
   amountSold: t.Number({ minimum: 0.0000001 }),
   amountReceived: t.Optional(t.Number({ minimum: 0.0000001 })),
   pricePerUnit: t.Optional(t.Number({ minimum: 0.0000001 })),
+  commissionPercent: t.Optional(t.Number({ minimum: 0 })),
 })
 
 export const createTransactionBodySchema = t.Union([

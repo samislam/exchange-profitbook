@@ -18,6 +18,7 @@ type SellInput = {
   amountSold: number
   amountReceived?: number
   pricePerUnit?: number
+  commissionPercent?: number
 }
 
 type CreateTransactionInput = BuyInput | SellInput
@@ -226,9 +227,12 @@ export class TransactionService {
       return toPlainTransaction(row)
     }
 
+    const commissionRatio = (input.commissionPercent ?? 0) / 100
+    const netSoldUsdt = input.amountSold * (1 - commissionRatio)
+
     const amountReceived =
-      input.amountReceived ?? (input.pricePerUnit as number | undefined)! * input.amountSold
-    const pricePerUnit = input.pricePerUnit ?? amountReceived / input.amountSold
+      input.amountReceived ?? (input.pricePerUnit as number | undefined)! * netSoldUsdt
+    const pricePerUnit = input.pricePerUnit ?? amountReceived / netSoldUsdt
 
     const row = await prismaClient.tradeTransaction.create({
       data: {
@@ -239,6 +243,7 @@ export class TransactionService {
         amountReceived,
         pricePerUnit,
         receivedCurrency: 'TRY',
+        commissionPercent: input.commissionPercent,
         effectiveRateTry: pricePerUnit,
       },
       include: { cycle: true },

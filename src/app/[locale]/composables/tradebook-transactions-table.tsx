@@ -23,17 +23,17 @@ type TradebookTransactionsTableProps = {
   showCycleColumn?: boolean
 }
 
-const formatUsdt = (value: number) =>
-  value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
+const truncateToTwoDecimals = (value: number) => Math.trunc(value * 100) / 100
+
+const formatAmount = (value: number) =>
+  truncateToTwoDecimals(value).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })
 
-const formatTry = (value: number) =>
-  value.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })
+const formatUsdt = (value: number) => formatAmount(value)
+
+const formatTry = (value: number) => formatAmount(value)
 
 const formatSignedUsdt = (value: number) =>
   value === 0 ? formatUsdt(0) : `${value > 0 ? '+' : '-'}${formatUsdt(Math.abs(value))}`
